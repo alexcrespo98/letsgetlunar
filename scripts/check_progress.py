@@ -77,7 +77,7 @@ def time_since_best(best_idx, total_evals, steps, t0):
 
 
 while True:
-    os.system('cls')
+    os.system('cls' if os.name == 'nt' else 'clear')
     print('=' * 60)
     print(f'  RL training monitor   training time: {elapsed(TRAIN_START)}')
     print('=' * 60)
