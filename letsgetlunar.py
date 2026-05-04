@@ -18,6 +18,8 @@ LOGS    = os.path.join(ROOT, 'logs')
 MODELS  = os.path.join(ROOT, 'models')
 SCRIPTS = os.path.join(ROOT, 'scripts')
 
+MACHINE = 'main'  # set by _select_machine() at startup
+
 os.chdir(ROOT)
 os.makedirs(LOGS,   exist_ok=True)
 os.makedirs(MODELS, exist_ok=True)
@@ -45,6 +47,43 @@ ABORT_REASONS = [
     'time limit reached',
     'other',
 ]
+
+
+# ── machine selection ────────────────────────────────────────────────────────
+
+def _select_machine():
+    """ask which machine this is and set the global MACHINE variable."""
+    global MACHINE
+    print('which machine is this?')
+    print('  1. main (windows PC)')
+    print('  2. backup (macbook air, ubuntu)')
+    while True:
+        choice = input('enter 1 or 2: ').strip()
+        if choice == '1':
+            MACHINE = 'main'
+            break
+        if choice == '2':
+            MACHINE = 'backup'
+            break
+        print('  invalid choice. enter 1 or 2.')
+
+    if MACHINE == 'backup':
+        print()
+        print('backup machine selected (macbook air, ubuntu)')
+        print()
+        print('before continuing, make sure you have:')
+        print('  at least 8 GB RAM free (SAC replay buffer + model weights use ~4-6 GB)')
+        print('  at least 4 CPU cores available (training is CPU bound, no GPU needed)')
+        print('  python 3.10 or higher')
+        print('  the following packages installed:')
+        print()
+        print('    pip install stable-baselines3[extra] gymnasium numpy matplotlib')
+        print()
+        print('  pull the latest repo before training:')
+        print('    git pull origin main')
+        print()
+        input('press enter to continue...')
+        print()
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -105,6 +144,14 @@ def _all_model_zips():
 def _launch_monitor():
     """launch scripts/check_progress.py in a separate terminal (background)."""
     script = os.path.join(SCRIPTS, 'check_progress.py')
+
+    if MACHINE == 'backup':
+        try:
+            subprocess.Popen(['bash', '-c', f'python3 {script}'], start_new_session=True)
+        except Exception as exc:
+            print(f'  note: could not launch monitor ({exc}). run scripts/check_progress.py manually.')
+        return
+
     plat = platform.system()
     try:
         if plat == 'Windows':
@@ -263,9 +310,14 @@ def _train_new_model():
     sys.path.insert(0, SCRIPTS)
     from train_agent import run_experiments  # noqa: PLC0415
 
+    exploring_starts_C = True
+    if MACHINE == 'backup':
+        exploring_starts_C = False
+        print('  backup mode: using fixed starts for exp C to match eval conditions')
+
     aborted = False
     try:
-        run_experiments(budgets=budgets)
+        run_experiments(budgets=budgets, exploring_starts_C=exploring_starts_C)
     except KeyboardInterrupt:
         print('\n  training interrupted.')
         aborted = True
@@ -356,6 +408,8 @@ def main():
     print('project 3 - RL orbital insertion')
     print('alex crespo | 2026')
     print()
+
+    _select_machine()
 
     MENU = [
         ('train a new model',      _train_new_model),
