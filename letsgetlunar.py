@@ -343,15 +343,19 @@ def _run_pretrained_model():
         else:
             best      = float('nan')
             n_success = 0
-        label = os.path.relpath(z, MODELS)
+        base_label = os.path.relpath(z, MODELS)
+        if not np.isnan(best):
+            label = f'{base_label}  (best: {best:.1f})'
+        else:
+            label = base_label
         rows.append((label, exp, best, n_success, z))
 
     print('\n  available models:')
-    print(f"  {'#':>4}  {'model':<40}  {'exp':>4}  {'best reward':>11}  evals")
-    print(f"  {'----':>4}  {'----------------------------------------':<40}  {'----':>4}  {'-----------':>11}  -----")
+    print(f"  {'#':>4}  {'model':<44}  {'exp':>4}  {'best reward':>11}  evals")
+    print(f"  {'----':>4}  {'--------------------------------------------':<44}  {'----':>4}  {'-----------':>11}  -----")
     for i, (label, exp, best, n_success, z) in enumerate(rows, 1):
         best_str = f'{best:.1f}' if not np.isnan(best) else 'n/a'
-        print(f'  {i:>4}  {label:<40}  {exp:>4}  {best_str:>11}  ({n_success})')
+        print(f'  {i:>4}  {label:<44}  {exp:>4}  {best_str:>11}  ({n_success})')
 
     choice = input('\n  pick a model by number (or enter to cancel): ').strip()
     if not choice:
@@ -400,6 +404,90 @@ def _run_pretrained_model():
     print(f'  steps:         {steps}')
 
 
+def _finetune_exp_c():
+    print('\nfine-tune experiment C')
+
+    # list only exp C models
+    all_zips = _all_model_zips()
+    c_zips = [z for z in all_zips if _exp_from_zip(z) == 'C']
+    if not c_zips:
+        print('\n  no exp C models found in models/. train a model first.')
+        return
+
+    rows = []
+    for z in c_zips:
+        d = _read_eval_log('C')
+        if d is not None:
+            means = d['results'].mean(axis=1)
+            best  = float(means.max())
+            n_evals = len(means)
+        else:
+            best    = float('nan')
+            n_evals = 0
+        base_label = os.path.relpath(z, MODELS)
+        if not np.isnan(best):
+            label = f'{base_label}  (best: {best:.1f})'
+        else:
+            label = base_label
+        rows.append((label, best, n_evals, z))
+
+    print('\n  available exp C models:')
+    print(f"  {'#':>4}  {'model':<44}  {'best reward':>11}  evals")
+    print(f"  {'----':>4}  {'--------------------------------------------':<44}  {'-----------':>11}  -----")
+    for i, (label, best, n_evals, z) in enumerate(rows, 1):
+        best_str = f'{best:.1f}' if not np.isnan(best) else 'n/a'
+        print(f'  {i:>4}  {label:<44}  {best_str:>11}  ({n_evals})')
+
+    choice = input('\n  pick a model by number (or enter to cancel): ').strip()
+    if not choice:
+        return
+    try:
+        idx = int(choice) - 1
+        label, best, n_evals, model_path = rows[idx]
+    except (ValueError, IndexError):
+        print('  invalid choice.')
+        return
+
+    hours_str = input('  how many additional hours to train? (enter for default 2M steps): ').strip()
+    if hours_str == '':
+        budget = 2_000_000
+    else:
+        try:
+            budget = int(float(hours_str) * STEPS_PER_HOUR)
+            budget = max(budget, 50_000)
+        except ValueError:
+            print('  invalid input. using default 2M steps.')
+            budget = 2_000_000
+
+    print(f'\n  warm-starting from: {label}')
+    print(f'  additional steps:   {budget:,}')
+
+    # write sentinel file so monitor knows we are in fine-tune mode
+    sentinel = os.path.join(LOGS, '.finetune_mode')
+    with open(sentinel, 'w') as f:
+        f.write(str(budget))
+
+    print('\n  launching training monitor in background...')
+    _launch_monitor()
+
+    sys.path.insert(0, SCRIPTS)
+    from train_agent import finetune_exp_c  # noqa: PLC0415
+
+    exploring_starts_C = MACHINE != 'backup'
+
+    aborted = False
+    try:
+        finetune_exp_c(model_path, budget=budget, exploring_starts_C=exploring_starts_C)
+    except KeyboardInterrupt:
+        print('\n  fine-tuning interrupted.')
+        aborted = True
+    finally:
+        if os.path.exists(sentinel):
+            os.remove(sentinel)
+
+    _log_attempt(aborted, budgets={'A': 0, 'B': 0, 'C': budget})
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -409,12 +497,18 @@ def main():
     print('alex crespo | 2026')
     print()
 
+    grader = input('  are you a grader? (y/n): ').strip().lower()
+    if grader == 'y':
+        print('  stay tuned, still training.')
+        return
+
     _select_machine()
 
     MENU = [
-        ('train a new model',      _train_new_model),
-        ('run a pre-trained model', _run_pretrained_model),
-        ('quit',                   None),
+        ('train a new model (experiments A, B, C from scratch)', _train_new_model),
+        ('run a pre-trained model',                              _run_pretrained_model),
+        ('fine-tune experiment C (warm-start from existing model)', _finetune_exp_c),
+        ('quit',                                                 None),
     ]
 
     while True:

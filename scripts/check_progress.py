@@ -7,8 +7,21 @@ import time
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 os.chdir(ROOT)
 
+# ── detect fine-tune mode ────────────────────────────────────────────────────
+SENTINEL = os.path.join('logs', '.finetune_mode')
+FINETUNE_MODE = os.path.exists(SENTINEL)
+FINETUNE_BUDGET = None
+if FINETUNE_MODE:
+    try:
+        with open(SENTINEL) as _sf:
+            FINETUNE_BUDGET = int(_sf.read().strip())
+    except (ValueError, OSError):
+        print('  warning: could not read fine-tune budget from sentinel file; defaulting to 2,000,000 steps.')
+        FINETUNE_BUDGET = 2_000_000
+
 TRAIN_START = None
-for _exp in ('A', 'B', 'C'):
+_exps_to_check = ('C',) if FINETUNE_MODE else ('A', 'B', 'C')
+for _exp in _exps_to_check:
     # check tagged dirs (exp_A_001) then untagged (exp_A)
     _tagged = sorted(glob.glob(os.path.join('logs', f'exp_{_exp}_[0-9][0-9][0-9]', 'evaluations.npz')))
     _plain  = os.path.join('logs', f'exp_{_exp}', 'evaluations.npz')
@@ -79,10 +92,14 @@ def time_since_best(best_idx, total_evals, steps, t0):
 while True:
     os.system('cls' if os.name == 'nt' else 'clear')
     print('=' * 60)
-    print(f'  RL training monitor   training time: {elapsed(TRAIN_START)}')
+    if FINETUNE_MODE:
+        print(f'  fine-tune monitor (exp C)   training time: {elapsed(TRAIN_START)}')
+    else:
+        print(f'  RL training monitor   training time: {elapsed(TRAIN_START)}')
     print('=' * 60)
 
-    for exp in ('A', 'B', 'C'):
+    active_exps = ('C',) if FINETUNE_MODE else ('A', 'B', 'C')
+    for exp in active_exps:
         p = _find_eval_path(exp)
         print(f'\n  exp {exp}', end='')
 
@@ -106,16 +123,22 @@ while True:
         # how long ago was the best found
         since_best = time_since_best(best_idx, total_evals, steps, TRAIN_START)
 
-        done = _next_started(exp)
-        pct  = 100.0 if done else min(99.0, steps / TOTAL[exp] * 100)
+        # total steps for this run
+        if FINETUNE_MODE and FINETUNE_BUDGET is not None:
+            exp_total = FINETUNE_BUDGET
+        else:
+            exp_total = TOTAL[exp]
+
+        done = False if FINETUNE_MODE else _next_started(exp)
+        pct  = 100.0 if done else min(99.0, steps / exp_total * 100)
 
         status = ' [ done ]' if done else ''
-        print(f'  {steps/1e6:.2f}M / {TOTAL[exp]/1e6:.1f}M steps{status}')
+        print(f'  {steps/1e6:.2f}M / {exp_total/1e6:.1f}M steps{status}')
         print(f'  {bar(pct)}')
         print(f'  recent: {recent:>10.1f}   best: {best:>10.1f}   ({since_best})')
         print(f'  successful evals: {n_success}/{total_evals}  ({100*n_success/max(total_evals,1):.0f}%)')
         if not done:
-            print(f'  ETA: {eta(steps, TOTAL[exp], TRAIN_START)}')
+            print(f'  ETA: {eta(steps, exp_total, TRAIN_START)}')
         else:
             print('  ETA: complete')
 
