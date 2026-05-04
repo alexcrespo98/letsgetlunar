@@ -1,0 +1,4 @@
+exp,algorithm,reward_fn,success,total_reward,final_alt_km,final_vr,final_vtan,steps
+A,PPO,sparse,False,-100.00,600.01,13184.34,5879.62,1322
+B,PPO,shaped,False,-330.16,-1.77,-699.20,3121.73,218
+C,SAC,multiobjective,False,768.16,19.67,490.31,23578.79,3200
