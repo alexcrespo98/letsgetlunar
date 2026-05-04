@@ -40,7 +40,7 @@ def next_model_tag(exp):
     return f'exp_{exp}_{max(nums) + 1:03d}'
 
 
-def run_experiments(budgets=None):
+def run_experiments(budgets=None, exploring_starts_C=True):
     """run all three RL experiments. budgets dict maps exp letter to step count."""
     if budgets is None:
         budgets = {'A': 500_000, 'B': 2_000_000, 'C': 2_000_000}
@@ -155,8 +155,8 @@ def run_experiments(budgets=None):
     print(f"model tag: {tag_C}  steps: {budgets['C']:,}")
     print("="*60)
 
-    env_C  = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=True))
-    eval_C = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=True))
+    env_C  = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=exploring_starts_C))
+    eval_C = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=exploring_starts_C))
 
     model_C = SAC(
         'MlpPolicy', env_C,

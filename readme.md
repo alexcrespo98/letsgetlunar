@@ -33,3 +33,19 @@ output/                trajectory CSV files and results table
 - gymnasium
 - numpy
 - matplotlib
+
+## running on two machines
+
+the project is designed to run on two machines simultaneously.
+
+the main machine (windows PC) runs exp C with exploring starts enabled. the backup machine (macbook air, ubuntu) runs exp C with exploring starts disabled, which trains from the fixed initial condition that evaluation uses. this is the more targeted run.
+
+models are not shared during training. after both finish, copy the better best_model.zip manually.
+
+to set up the backup machine from scratch:
+
+- git clone https://github.com/alexcrespo98/letsgetlunar
+- cd letsgetlunar
+- pip install stable-baselines3[extra] gymnasium numpy matplotlib
+- python3 letsgetlunar.py
+- select backup when prompted
