@@ -3,6 +3,7 @@
 # alex crespo | 2026
 # usage: python letsgetlunar.py
 
+import time
 import base64
 import csv
 import datetime
