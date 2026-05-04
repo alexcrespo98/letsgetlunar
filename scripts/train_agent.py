@@ -200,5 +200,43 @@ def run_experiments(budgets=None, exploring_starts_C=True):
     print("run: tensorboard --logdir logs/  to view training curves")
 
 
+def finetune_exp_c(model_path, budget=2_000_000, exploring_starts_C=False):
+    """load an existing exp C model and continue training from it."""
+    tag_C = next_model_tag('C')
+    print("\n" + "="*60)
+    print(f"FINE-TUNE EXP C: SAC | warm-start from {os.path.basename(model_path)}")
+    print(f"model tag: {tag_C}  additional steps: {budget:,}")
+    print("="*60)
+
+    env_C  = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=exploring_starts_C))
+    eval_C = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=exploring_starts_C))
+
+    # load existing model and set new env
+    model_C = SAC.load(model_path.replace('.zip', ''), env=env_C)
+
+    best_dir_C = os.path.join(MODELS, tag_C + '_best_tmp')
+    os.makedirs(best_dir_C, exist_ok=True)
+    stop_C = StopTrainingOnNoModelImprovement(max_no_improvement_evals=20, min_evals=5, verbose=1)
+    cb_C = EvalCallback(
+        eval_C,
+        best_model_save_path=best_dir_C,
+        log_path=os.path.join(LOGS, tag_C),
+        eval_freq=10000,
+        n_eval_episodes=5,
+        deterministic=True,
+        verbose=1,
+        callback_after_eval=stop_C,
+    )
+
+    model_C.learn(total_timesteps=budget, callback=cb_C, reset_num_timesteps=True)
+    model_C.save(os.path.join(MODELS, tag_C))
+
+    best_src_C = os.path.join(best_dir_C, 'best_model.zip')
+    if os.path.exists(best_src_C):
+        shutil.move(best_src_C, os.path.join(MODELS, tag_C + '_best.zip'))
+    shutil.rmtree(best_dir_C, ignore_errors=True)
+    print(f"FINE-TUNE DONE  ->  {tag_C}.zip")
+
+
 if __name__ == '__main__':
     run_experiments()
