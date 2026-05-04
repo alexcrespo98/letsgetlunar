@@ -24,12 +24,12 @@ X3_0   = 0.0
 X4_0   = 0.0
 BETA_0 = np.radians(90.0)
 
-# ── OBSERVATION GAINS (matches Simulink system_79) ───────────────────────────
+# ── OBSERVATION GAINS ───────────────────────────────────────────────────────
 GAIN_ALT = 0.0022222
 GAIN_VR  = 4e-5
 GAIN_VT  = 4e-5
 
-# ── RATE LIMITER (matches Simulink Rate Limiter block) ───────────────────────
+# ── RATE LIMITER ─────────────────────────────────────────────────────────────
 TS        = 0.05
 MAX_DBETA = np.radians(2000.0 * TS)
 

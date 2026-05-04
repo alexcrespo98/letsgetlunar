@@ -462,16 +462,16 @@ def _finetune_exp_c():
     print(f'\n  warm-starting from: {label}')
     print(f'  additional steps:   {budget:,}')
 
-    # write sentinel file so monitor knows we are in fine-tune mode
+    # write sentinel so monitor knows which tag dir to watch
     sentinel = os.path.join(LOGS, '.finetune_mode')
+    sys.path.insert(0, SCRIPTS)
+    from train_agent import finetune_exp_c, next_model_tag  # noqa: PLC0415
+    next_tag = next_model_tag('C')
     with open(sentinel, 'w') as f:
-        f.write(str(budget))
+        f.write(f'{budget} {next_tag}')
 
     print('\n  launching training monitor in background...')
     _launch_monitor()
-
-    sys.path.insert(0, SCRIPTS)
-    from train_agent import finetune_exp_c  # noqa: PLC0415
 
     exploring_starts_C = MACHINE != 'backup'
 
@@ -499,7 +499,23 @@ def main():
 
     grader = input('  are you a grader? (y/n): ').strip().lower()
     if grader == 'y':
-        print('  stay tuned, still training.')
+        print()
+        print('  hello! glad you\'re here.')
+        print()
+        print('  would you like to:')
+        print('    1. train a model for experiments A, B, and C  (hope you have time — it took ~16 hours total!)')
+        print('    2. run one of my pre-trained models  (higher reward = better performance)')
+        print('    3. exit')
+        print()
+        grader_choice = input('  pick an option: ').strip()
+        if grader_choice == '1':
+            global MACHINE
+            MACHINE = 'main'
+            _train_new_model()
+        elif grader_choice == '2':
+            _run_pretrained_model()
+        else:
+            print('  see you later!')
         return
 
     _select_machine()

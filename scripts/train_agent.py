@@ -45,10 +45,7 @@ def run_experiments(budgets=None, exploring_starts_C=True):
     if budgets is None:
         budgets = {'A': 500_000, 'B': 2_000_000, 'C': 2_000_000}
 
-    # ── EXPERIMENT A: PPO, SMALL NETWORK, SPARSE REWARD ─────────────────────────
-    # Hypothesis: will not converge — sparse reward with 3200 steps/episode
-    # is too hard. Demonstrates why reward shaping is necessary.
-    # Expected result: flat reward curve, no successful episodes.
+    # exp A: PPO, sparse reward, small net — baseline, not expected to converge
     tag_A = next_model_tag('A')
     print("\n" + "="*60)
     print("EXPERIMENT A: PPO | 64-64 | SPARSE REWARD | FIXED STARTS")
@@ -60,13 +57,13 @@ def run_experiments(budgets=None, exploring_starts_C=True):
 
     model_A = PPO(
         'MlpPolicy', env_A,
-        policy_kwargs=dict(net_arch=[64, 64]),  # small — matches study1.m suggestion
+        policy_kwargs=dict(net_arch=[64, 64]),
         learning_rate=3e-4,
-        n_steps=3200,           # one full episode horizon
+        n_steps=3200,
         batch_size=64,
         n_epochs=10,
-        gamma=0.99,             # matches agentOpts.DiscountFactor in study1.m
-        ent_coef=0.01,          # EntropyLossWeight analog
+        gamma=0.99,
+        ent_coef=0.01,
         verbose=1,
         tensorboard_log=os.path.join(LOGS, tag_A)
     )
@@ -94,10 +91,7 @@ def run_experiments(budgets=None, exploring_starts_C=True):
     shutil.rmtree(best_dir_A, ignore_errors=True)
     print(f"EXP A DONE  ->  {tag_A}.zip")
 
-    # ── EXPERIMENT B: PPO, LARGE NETWORK, SHAPED REWARD ─────────────────────────
-    # Hypothesis: will show some convergence. Larger net + dense reward
-    # should guide the agent meaningfully. Beta-continuity term built into reward.
-    # Expected result: partial convergence, smoother beta profile than Proj 2 NLP.
+    # exp B: PPO, shaped reward, larger net — expect partial convergence
     tag_B = next_model_tag('B')
     print("\n" + "="*60)
     print("EXPERIMENT B: PPO | 256-128-64 | SHAPED REWARD | FIXED STARTS")
@@ -109,7 +103,7 @@ def run_experiments(budgets=None, exploring_starts_C=True):
 
     model_B = PPO(
         'MlpPolicy', env_B,
-        policy_kwargs=dict(net_arch=[256, 128, 64]),  # large
+        policy_kwargs=dict(net_arch=[256, 128, 64]),
         learning_rate=3e-4,
         n_steps=3200,
         batch_size=128,
@@ -143,12 +137,7 @@ def run_experiments(budgets=None, exploring_starts_C=True):
     shutil.rmtree(best_dir_B, ignore_errors=True)
     print(f"EXP B DONE  ->  {tag_B}.zip")
 
-    # ── EXPERIMENT C: SAC, MEDIUM NETWORK, MULTI-OBJECTIVE, EXPLORING STARTS ─────
-    # Hypothesis: best convergence. SAC handles continuous actions better,
-    # auto-tunes entropy, off-policy so more sample efficient.
-    # Exploring starts expands state coverage. Multi-objective reward is most
-    # physically meaningful (min-time + continuity + proximity).
-    # Expected result: smoothest beta profile, closest to NLP optimal solution.
+    # exp C: SAC, multiobjective reward, exploring starts — should converge best
     tag_C = next_model_tag('C')
     print("\n" + "="*60)
     print("EXPERIMENT C: SAC | 128-128 | MULTI-OBJECTIVE | EXPLORING STARTS")
@@ -160,13 +149,13 @@ def run_experiments(budgets=None, exploring_starts_C=True):
 
     model_C = SAC(
         'MlpPolicy', env_C,
-        policy_kwargs=dict(net_arch=[128, 128]),  # medium
+        policy_kwargs=dict(net_arch=[128, 128]),
         learning_rate=3e-4,
         buffer_size=500_000,
         batch_size=256,
         gamma=0.99,
         tau=0.005,
-        ent_coef='auto',        # SAC auto-tunes entropy coefficient
+        ent_coef='auto',
         verbose=1,
         tensorboard_log=os.path.join(LOGS, tag_C)
     )
@@ -211,7 +200,6 @@ def finetune_exp_c(model_path, budget=2_000_000, exploring_starts_C=False):
     env_C  = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=exploring_starts_C))
     eval_C = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=exploring_starts_C))
 
-    # load existing model and set new env
     model_C = SAC.load(model_path.replace('.zip', ''), env=env_C)
 
     best_dir_C = os.path.join(MODELS, tag_C + '_best_tmp')
