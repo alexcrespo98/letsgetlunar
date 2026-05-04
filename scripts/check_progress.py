@@ -11,40 +11,34 @@ os.chdir(ROOT)
 SENTINEL = os.path.join('logs', '.finetune_mode')
 FINETUNE_MODE = os.path.exists(SENTINEL)
 FINETUNE_BUDGET = None
+FINETUNE_TAG = None
 if FINETUNE_MODE:
     try:
         with open(SENTINEL) as _sf:
-            FINETUNE_BUDGET = int(_sf.read().strip())
-    except (ValueError, OSError):
-        print('  warning: could not read fine-tune budget from sentinel file; defaulting to 2,000,000 steps.')
+            _parts = _sf.read().strip().split()
+            FINETUNE_BUDGET = int(_parts[0])
+            FINETUNE_TAG = _parts[1] if len(_parts) > 1 else None
+    except (ValueError, OSError, IndexError):
         FINETUNE_BUDGET = 2_000_000
 
-TRAIN_START = None
-_exps_to_check = ('C',) if FINETUNE_MODE else ('A', 'B', 'C')
-for _exp in _exps_to_check:
-    # check tagged dirs (exp_A_001) then untagged (exp_A)
-    _tagged = sorted(glob.glob(os.path.join('logs', f'exp_{_exp}_[0-9][0-9][0-9]', 'evaluations.npz')))
-    _plain  = os.path.join('logs', f'exp_{_exp}', 'evaluations.npz')
-    _candidates = _tagged + ([_plain] if os.path.exists(_plain) else [])
-    if _candidates:
-        TRAIN_START = os.path.getmtime(_candidates[-1])
-        break
-if TRAIN_START is None:
-    TRAIN_START = time.time()
+TRAIN_START = time.time()
 
 TOTAL    = {'A': 500_000, 'B': 2_000_000, 'C': 2_000_000}
 NEXT_EXP = {'A': 'B',    'B': 'C',        'C': None}
 
-# reward threshold to count an eval period as "successful"
 SUCCESS_THRESH = {'A': -50.0, 'B': -50.0, 'C': 500.0}
 
 
 def _find_eval_path(exp):
     """return path to most recent evaluations.npz for exp, or None."""
+    if FINETUNE_MODE and FINETUNE_TAG:
+        p = os.path.join('logs', FINETUNE_TAG, 'evaluations.npz')
+        return p if os.path.exists(p) else None
     tagged = sorted(glob.glob(os.path.join('logs', f'exp_{exp}_[0-9][0-9][0-9]', 'evaluations.npz')))
     plain  = os.path.join('logs', f'exp_{exp}', 'evaluations.npz')
-    candidates = tagged + ([plain] if os.path.exists(plain) else [])
-    return candidates[-1] if candidates else None
+    if tagged:
+        return tagged[-1]
+    return plain if os.path.exists(plain) else None
 
 
 def _next_started(exp):
@@ -74,7 +68,6 @@ def eta(steps, total, t0):
 
 
 def time_since_best(best_idx, total_evals, steps, t0):
-    # estimate wall time of the best eval by interpolating through training
     if total_evals <= 1:
         return 'just now'
     frac_through   = best_idx / (total_evals - 1)
@@ -93,7 +86,7 @@ while True:
     os.system('cls' if os.name == 'nt' else 'clear')
     print('=' * 60)
     if FINETUNE_MODE:
-        print(f'  fine-tune monitor (exp C)   training time: {elapsed(TRAIN_START)}')
+        print(f'  fine-tune monitor (exp C)   additional time: {elapsed(TRAIN_START)}')
     else:
         print(f'  RL training monitor   training time: {elapsed(TRAIN_START)}')
     print('=' * 60)
@@ -109,21 +102,18 @@ while True:
 
         d       = np.load(p)
         steps   = d['timesteps'][-1]
-        results = d['results']          # shape: (n_evals, n_eval_eps)
+        results = d['results']
         means   = results.mean(axis=1)
         recent  = means[-1]
         best    = means.max()
         best_idx = int(means.argmax())
 
-        # successful eval periods (mean reward above threshold)
         thresh      = SUCCESS_THRESH[exp]
         n_success   = int((means >= thresh).sum())
         total_evals = len(means)
 
-        # how long ago was the best found
         since_best = time_since_best(best_idx, total_evals, steps, TRAIN_START)
 
-        # total steps for this run
         if FINETUNE_MODE and FINETUNE_BUDGET is not None:
             exp_total = FINETUNE_BUDGET
         else:

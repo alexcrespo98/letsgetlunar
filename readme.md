@@ -1,51 +1,47 @@
 # letsgetlunar
 
-project 3. an RL agent learns to perform lunar orbital insertion, guiding a spacecraft from the lunar surface to a 400 km circular orbit by adjusting thrust angle over a 160 second burn.
+hi there — if you're a grader, the full write-up is in **project3.pdf**.
 
-three experiments compare reward functions and network sizes: experiment A uses PPO with sparse reward as a baseline, experiment B uses PPO with shaped reward, and experiment C uses SAC with a multiobjective reward and exploring starts.
-
-## how to run
+if you want to run the code yourself:
 
 ```
 python letsgetlunar.py
 ```
 
-the interactive menu lets you train a new model or run a pre-trained one. when training starts it automatically launches the progress monitor in a separate terminal window.
+it'll walk you through everything interactively. you can train from scratch, run a pre-trained model, or fine-tune experiment C. pretty self-explanatory once you're in the menu.
 
-## folder structure
+## what's in here
 
 ```
-letsgetlunar.py        main interactive entry point - run this
-readme.md
+letsgetlunar.py          entry point — run this
 scripts/
-    lunar_env.py       gymnasium environment (equations of motion, reward functions)
-    train_agent.py     training code for all three experiments
-    evaluate_agent.py  deterministic evaluation and CSV output
-    check_progress.py  live training monitor (auto-launched during training)
-logs/                  tensorboard logs and evaluations.npz files per run
-models/                saved model weights (exp_A_001.zip, exp_A_001_best.zip, ...)
-output/                trajectory CSV files and results table
+    lunar_env.py         the physics: equations of motion, reward functions, gymnasium environment
+    train_agent.py       training logic for all three experiments
+    evaluate_agent.py    deterministic evaluation, outputs CSV
+    check_progress.py    live training monitor, auto-launched during training
+logs/                    tensorboard logs and evaluations.npz per run
+models/                  saved model weights (exp_A_001.zip, exp_C_002_best.zip, ...)
+output/                  trajectory CSVs and results table
 ```
+
+if you want to dig into the physics, start with `scripts/lunar_env.py`. if you want to see the pretrained models or run them yourself, they're in `models/` — pick option 2 from the menu and it'll list them with their best reward so you know which one performed best.
 
 ## dependencies
 
-- stable-baselines3
-- gymnasium
-- numpy
-- matplotlib
+```
+pip install stable-baselines3[extra] gymnasium numpy matplotlib
+```
 
-## running on two machines
+python 3.10+.
 
-the project is designed to run on two machines simultaneously.
+## the two-machine setup
 
-the main machine (windows PC) runs exp C with exploring starts enabled. the backup machine (macbook air, ubuntu) runs exp C with exploring starts disabled, which trains from the fixed initial condition that evaluation uses. this is the more targeted run.
+someone was throwing out a macbook air with a broken screen. i took it, put ubuntu on it, and used it to run a second training process in parallel. each machine runs 2 million steps of experiment C simultaneously — one with exploring starts (random initial conditions), one fixed. when both finish i take whichever model is better and fine-tune it further.
 
-models are not shared during training. after both finish, copy the better best_model.zip manually.
+i'm working on automating the model-sharing so they can hand off to each other without me babysitting it. right now i manually scp the best zip between machines.
 
-to set up the backup machine from scratch:
+running on two different OSes (Windows and Ubuntu) actually did add some friction. the terminal launching code had to be split — Windows uses `start cmd`, Linux tries xterm/gnome-terminal, and the python binary is `python` on Windows and `python3` on Ubuntu. small stuff but it adds up.
 
-- git clone https://github.com/alexcrespo98/letsgetlunar
-- cd letsgetlunar
-- pip install stable-baselines3[extra] gymnasium numpy matplotlib
-- python3 letsgetlunar.py
-- select backup when prompted
+## status
+
+still training. best reward so far: ~810. target is consistent orbit at 400 km altitude.
