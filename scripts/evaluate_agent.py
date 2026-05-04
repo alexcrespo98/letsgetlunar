@@ -2,7 +2,11 @@
 # loads saved models, runs deterministic episodes, saves results to CSV
 # alex crespo | 2026
 
-import os, sys, csv
+import glob
+import os
+import sys
+import csv
+
 sys.path.insert(0, os.path.dirname(__file__))
 
 import numpy as np
@@ -13,23 +17,42 @@ MODELS = os.path.join(os.path.dirname(__file__), '..', 'models')
 OUT    = os.path.join(os.path.dirname(__file__), '..', 'output')
 os.makedirs(OUT, exist_ok=True)
 
-EXPERIMENTS = [
-    ('A', PPO, 'ppo_sparse_small/final',          'sparse',         False),
-    ('B', PPO, 'ppo_shaped_large/final',           'shaped',         False),
-    ('C', SAC, 'sac_multiobjective_medium/best_model',  'multiobjective', True),
-]
+
+def _latest_model_path(exp):
+    """return path (without .zip) to the most recent exp_X_NNN_best or exp_X_NNN model."""
+    # prefer best models; fall back to final
+    for suffix in ('_best', ''):
+        pattern = os.path.join(MODELS, f'exp_{exp}_[0-9][0-9][0-9]{suffix}.zip')
+        matches = sorted(glob.glob(pattern))
+        if matches:
+            return matches[-1].replace('.zip', '')
+    return None
+
+
+_EXP_META = {
+    'A': (PPO, 'sparse',         False),
+    'B': (PPO, 'shaped',         False),
+    'C': (SAC, 'multiobjective', True),
+}
+
+EXPERIMENTS = []
+for _exp, (_cls, _rfn, _es) in _EXP_META.items():
+    _path = _latest_model_path(_exp)
+    if _path is not None:
+        EXPERIMENTS.append((_exp, _cls, _path, _rfn, _es))
+    else:
+        print(f"  [!] no model found for exp {_exp} in models/ -- skipping")
 
 summary_rows = []
 
 for exp_id, ModelClass, model_path, reward_fn, exploring_starts in EXPERIMENTS:
     print(f"\n--- EVALUATING EXPERIMENT {exp_id} ---")
-    full_path = os.path.join(MODELS, model_path)
 
-    if not os.path.exists(full_path + '.zip'):
-        print(f"  [!] Model not found: {full_path}.zip — skipping")
+    if not os.path.exists(model_path + '.zip'):
+        print(f"  [!] model not found: {model_path}.zip -- skipping")
         continue
 
-    model = ModelClass.load(full_path)
+    model = ModelClass.load(model_path)
     env   = LunarOrbitEnv(reward_fn=reward_fn, exploring_starts=False)  # fixed ICs for fair eval
 
     # Run one full deterministic episode and record trajectory

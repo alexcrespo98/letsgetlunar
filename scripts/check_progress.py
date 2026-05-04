@@ -1,11 +1,20 @@
-# live_plot.py - terminal training monitor
-import numpy as np, os, time
+# scripts/check_progress.py - terminal training monitor
+import glob
+import numpy as np
+import os
+import time
+
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+os.chdir(ROOT)
 
 TRAIN_START = None
-for exp in ('A','B','C'):
-    p = f'logs/exp_{exp}/evaluations.npz'
-    if os.path.exists(p):
-        TRAIN_START = os.path.getmtime(p)
+for _exp in ('A', 'B', 'C'):
+    # check tagged dirs (exp_A_001) then untagged (exp_A)
+    _tagged = sorted(glob.glob(os.path.join('logs', f'exp_{_exp}_[0-9][0-9][0-9]', 'evaluations.npz')))
+    _plain  = os.path.join('logs', f'exp_{_exp}', 'evaluations.npz')
+    _candidates = _tagged + ([_plain] if os.path.exists(_plain) else [])
+    if _candidates:
+        TRAIN_START = os.path.getmtime(_candidates[-1])
         break
 if TRAIN_START is None:
     TRAIN_START = time.time()
@@ -16,19 +25,40 @@ NEXT_EXP = {'A': 'B',    'B': 'C',        'C': None}
 # reward threshold to count an eval period as "successful"
 SUCCESS_THRESH = {'A': -50.0, 'B': -50.0, 'C': 500.0}
 
+
+def _find_eval_path(exp):
+    """return path to most recent evaluations.npz for exp, or None."""
+    tagged = sorted(glob.glob(os.path.join('logs', f'exp_{exp}_[0-9][0-9][0-9]', 'evaluations.npz')))
+    plain  = os.path.join('logs', f'exp_{exp}', 'evaluations.npz')
+    candidates = tagged + ([plain] if os.path.exists(plain) else [])
+    return candidates[-1] if candidates else None
+
+
+def _next_started(exp):
+    """check whether the next experiment has any eval log."""
+    nxt = NEXT_EXP[exp]
+    if nxt is None:
+        return False
+    return _find_eval_path(nxt) is not None
+
+
 def bar(pct, width=30):
     filled = int(width * pct / 100)
-    return '[' + '█'*filled + '░'*(width-filled) + f'] {pct:5.1f}%'
+    return '[' + '\u2588' * filled + '\u2591' * (width - filled) + f'] {pct:5.1f}%'
+
 
 def elapsed(t):
     s = int(time.time() - t)
     return f'{s//3600:02d}:{(s%3600)//60:02d}:{s%60:02d}'
 
+
 def eta(steps, total, t0):
-    if steps == 0: return '--:--:--'
+    if steps == 0:
+        return '--:--:--'
     rate      = steps / (time.time() - t0)
     remaining = (total - steps) / rate
     return f'{int(remaining//3600):02d}:{int((remaining%3600)//60):02d}:{int(remaining%60):02d}'
+
 
 def time_since_best(best_idx, total_evals, steps, t0):
     # estimate wall time of the best eval by interpolating through training
@@ -45,17 +75,18 @@ def time_since_best(best_idx, total_evals, steps, t0):
     else:
         return f'{int(ago//3600)}h {int((ago%3600)//60)}m ago'
 
+
 while True:
     os.system('cls')
-    print('='*60)
-    print(f'  RL TRAINING MONITOR   training time: {elapsed(TRAIN_START)}')
-    print('='*60)
+    print('=' * 60)
+    print(f'  RL training monitor   training time: {elapsed(TRAIN_START)}')
+    print('=' * 60)
 
-    for exp in ('A','B','C'):
-        p = f'logs/exp_{exp}/evaluations.npz'
-        print(f'\n  EXP {exp}', end='')
+    for exp in ('A', 'B', 'C'):
+        p = _find_eval_path(exp)
+        print(f'\n  exp {exp}', end='')
 
-        if not os.path.exists(p):
+        if p is None:
             print('  [ not started ]')
             continue
 
@@ -75,12 +106,10 @@ while True:
         # how long ago was the best found
         since_best = time_since_best(best_idx, total_evals, steps, TRAIN_START)
 
-        # done check
-        nxt  = NEXT_EXP[exp]
-        done = (nxt is not None and os.path.exists(f'logs/exp_{nxt}/evaluations.npz'))
+        done = _next_started(exp)
         pct  = 100.0 if done else min(99.0, steps / TOTAL[exp] * 100)
 
-        status = ' [ DONE ]' if done else ''
+        status = ' [ done ]' if done else ''
         print(f'  {steps/1e6:.2f}M / {TOTAL[exp]/1e6:.1f}M steps{status}')
         print(f'  {bar(pct)}')
         print(f'  recent: {recent:>10.1f}   best: {best:>10.1f}   ({since_best})')
@@ -88,8 +117,8 @@ while True:
         if not done:
             print(f'  ETA: {eta(steps, TOTAL[exp], TRAIN_START)}')
         else:
-            print(f'  ETA: complete')
+            print('  ETA: complete')
 
-    print('\n' + '='*60)
+    print('\n' + '=' * 60)
     print('  refreshing in 30s...  ctrl+c to quit')
     time.sleep(30)
