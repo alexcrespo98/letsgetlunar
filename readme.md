@@ -24,7 +24,7 @@ models/                  saved model weights (exp_A_main_001_r-45.zip, exp_C_mai
 output/                  trajectory CSVs and results table
 ```
 
-model filenames encode how well the model performed. after training finishes the file is renamed to include the best evaluation reward and a `_success` suffix when the model meets the success criterion for that experiment. pick option 2 from the menu to list models — higher reward = better performance.
+model filenames encode how well the model performed. after training finishes the file is renamed to include the best evaluation reward and a `_success` suffix when the model meets the success criterion for that experiment. so `exp_C_main_003_r810_success.zip` means: experiment C, windows PC, run 3, best eval reward 810, meets the 500-point success threshold.
 
 ## dependencies
 
@@ -72,19 +72,19 @@ if ping fails, fix the firewall first (see above). collab mode will also fail if
 collab works on any network where the two machines can reach each other on port 7777:
 
 - **same Wi-Fi / LAN** — just use the local IP addresses (e.g. `192.168.x.x`). find them with `ipconfig` on Windows and `ip addr` or `ifconfig` on Linux.
-- **Tailscale (anywhere)** — install [Tailscale](https://tailscale.com/) on both machines, log in with the same account, and use the `100.x.x.x` Tailscale IP instead of the LAN IP. this works even when the machines are on different networks or behind NAT.
+- **Tailscale (anywhere)** — install [Tailscale](https://tailscale.com/) on both machines, log in with the same account, and use the `100.x.x.x` Tailscale IP instead of the LAN IP. this works even across different networks (e.g. one machine on Wi-Fi, one on ethernet, or one at a different location entirely).
 
 ### how collab mode works
 
-1. **connect** — each machine listens on port 7777 and simultaneously tries to connect outward to the peer. whichever direction succeeds first becomes the session. you can type `ip <address>` at the prompt to change the peer IP without restarting.
+1. **connect** — each machine listens on port 7777 and simultaneously tries to connect outward to the peer. whichever direction succeeds first becomes the session. you can type `ip <address>` at the prompt to change the target IP on the fly.
 
 2. **model pot** — both machines share a list of available experiment C models ("the pot"). each entry shows the model name, its best evaluation reward, whether it's stored locally or on the peer, and whether it's currently being trained.
 
-3. **requesting models** — if the best available model isn't local, the machine sends a `model_request` to the peer, which streams the zip back over the socket. once received, the file is saved to `models/` and is ready to train from.
+3. **requesting models** — if the best available model isn't local, the machine sends a `model_request` to the peer, which streams the zip back over the socket. once received, the file is saved to `models/` and training starts automatically.
 
-4. **training loop** — each machine picks the highest-reward untrained model it has locally and launches a fine-tune run in a background thread (2 million steps by default). while training it broadcasts `training_start` so the peer knows not to train the same model.
+4. **training loop** — each machine picks the highest-reward untrained model it has locally and launches a fine-tune run in a background thread (2 million steps by default). while training it broadcasts `training_start` so the peer knows what's happening.
 
-5. **sharing results** — when training finishes the new model zip is renamed to include the reward (e.g. `exp_C_main_003_r810_success.zip`) and a `training_done` message is broadcast. the peer adds the new model to their pot and can request the zip to continue the chain.
+5. **sharing results** — when training finishes the new model zip is renamed to include the reward (e.g. `exp_C_main_003_r810_success.zip`) and a `training_done` message is broadcast. the peer adds it to the pot and can request it immediately if it's the new best.
 
 ### model naming convention
 
@@ -98,18 +98,20 @@ exp_C_main_003_r810_success.zip
       └─ experiment letter
 ```
 
-the `_success` suffix appears when the model's best reward meets the success threshold for that experiment (500 for experiment C). models without the suffix are still useful — they're just not quite there yet.
+the `_success` suffix appears when the model's best reward meets the success threshold for that experiment (500 for experiment C). models without the suffix are still useful — they're just not there yet.
 
 when checking out models from the pot, the filename tells you at a glance how well it performed.
 
 ## the story so far
 
-i trained experiments A, B, and C on the Windows machine over about 16 hours, watching the reward curves climb while monitoring in tensorboard. experiment C with the SAC agent and multi-objective reward was the clear winner, reaching a best reward around 810 before i had to stop.
+i trained experiments A, B, and C on the Windows machine over about 16 hours, watching the reward curves climb while monitoring in tensorboard. experiment C with the SAC agent and multi-objective reward got to a best reward of ~789, which already clears the 500-point success threshold.
 
-then i got another computer set up — a macbook air someone was throwing out, now running ubuntu — and spent a while getting the two machines talking to each other. once ping worked and the firewall rules were in, collab mode connected and the model pot started populating on both sides. the plan is to leave both machines running for about four days, each one fine-tuning the best model the other produces and passing the result back. we'll see if it works.
+then i got another computer set up — a macbook air someone was throwing out, now running ubuntu — and spent a while getting the two machines talking to each other. once ping worked and the firewall rules were in place, collab mode connected on the first try. both machines started fine-tuning exp C back and forth overnight.
 
-the machine name in the filename means neither side can accidentally overwrite the other's output, so they can genuinely run unsupervised without me babysitting file names.
+i checked back the next day after both machines had been running for about 20 hours. the initial improvement i saw early on had stopped. the reward was stuck around 850 and wasn't moving. the problem is all i had was a timestamp in the terminal — i couldn't tell whether the model had waves of near-success and then fell back, or whether it just flatlined there and stayed. 850 is above the success threshold (500) but i want to see if it can do better and actually nail the orbit consistently.
+
+next step: build a proper live GUI for each machine — a window that stays open while training, shows the current reward curve updating in real time, and plots each eval result with a timestamp on the x-axis so i can actually see the shape of the learning curve over wall-clock time, not just step count. that way if it spikes and falls back i'll know, and i can make better decisions about when to change parameters instead of guessing from a single number in the morning.
 
 ## status
 
-still training. best reward so far: ~810. target is consistent orbit at 400 km altitude.
+plateau reached. best reward so far: ~850. target is consistent orbit at 400 km altitude (success threshold: 500 reward). both machines have been running collab mode; next move is a live GUI dashboard per machine and a hyperparameter sweep to try to push past the plateau.
