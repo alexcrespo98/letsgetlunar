@@ -595,6 +595,17 @@ class _CollabSession:
             return None, None
         return max(cands, key=lambda x: x[1].get('best_reward', float('-inf')))
 
+    def best_available(self):
+        # like best_untrained but ignores being_trained so both machines can train the same base model simultaneously
+        with self._pot_lock:
+            cands = [
+                (n, dict(i)) for n, i in self._pot.items()
+                if not np.isnan(float(i.get('best_reward', float('nan'))))
+            ]
+        if not cands:
+            return None, None
+        return max(cands, key=lambda x: x[1].get('best_reward', float('-inf')))
+
     # ── internals ─────────────────────────────────────────────────────────────
 
     def _drop(self):
@@ -860,6 +871,7 @@ def _collab_train_loop(sess):
     cmd_q    = queue.Queue()
     current  = None
     training = False
+    pending_requests = set()  # models we've requested but not yet received, to avoid re-requesting each tick
 
     def _reader():
         while not sess.stopped:
@@ -879,7 +891,7 @@ def _collab_train_loop(sess):
             final_path, best = finetune_exp_c(
                 path.replace('.zip', ''),
                 budget=budget,
-                exploring_starts_C=(MACHINE == 'main'),
+                exploring_starts_C=True,  # train env uses exploring starts; eval env is always fixed (handled in train_agent.py)
                 machine=MACHINE,
                 tag=tag,
             )
@@ -909,6 +921,7 @@ def _collab_train_loop(sess):
                 n = msg.get('name')
                 if n:
                     print(f'\n  received {n} from peer')
+                    pending_requests.discard(n)  # request fulfilled
                     sess.set_pot(n, being_trained=False)
 
         # user commands
@@ -963,9 +976,9 @@ def _collab_train_loop(sess):
         except queue.Empty:
             pass
 
-        # start training if idle
+        # start training if idle — both machines can train the same base model simultaneously (different seeds → both useful)
         if not training:
-            name, info = sess.best_untrained()
+            name, info = sess.best_available()
             if name and info:
                 local_path = info.get('local_path')
                 if local_path and os.path.exists(local_path):
@@ -976,9 +989,8 @@ def _collab_train_loop(sess):
                     print(f'\n  starting fine-tune: {name}  (best: {r_disp:.1f})')
                     sess.send({'type': 'training_start', 'model': name})
                     threading.Thread(target=_train, args=(name, local_path), daemon=True).start()
-                elif local_path is None:
-                    # mark so we don't keep re-requesting every 0.5s
-                    sess.set_pot(name, being_trained=True)
+                elif local_path is None and name not in pending_requests:
+                    pending_requests.add(name)  # deduplicate requests
                     print(f'\n  requesting {name} from peer...')
                     sess.send({'type': 'model_request', 'name': name})
 
@@ -990,21 +1002,24 @@ def _collab_mode():
     global MACHINE
     print()
     print('  collab mode')
-    print(f'  main machine   (windows) → {MACHINE_IPS["main"]}')
-    print(f'  backup machine (ubuntu)  → {MACHINE_IPS["backup"]}')
+    print(f'  host (windows PC)        → {MACHINE_IPS["main"]}')
+    print(f'  auxiliary (macbook/ubuntu) → {MACHINE_IPS["backup"]}')
     print()
-    print('  which machine is this?  1. main   2. backup')
+    print('  1. host mode (windows PC, always listens on port 7777)')
+    print('  2. auxiliary mode (macbook/ubuntu, connects to host)')
     while True:
         ch = input('  pick 1 or 2: ').strip()
         if ch == '1':
             MACHINE = 'main'
+            peer_ip = MACHINE_IPS['backup']
+            print(f'\n  host mode: listening on port {COLLAB_PORT}, also trying {peer_ip}')
+            print('  waiting indefinitely for auxiliary to connect (type "q" to cancel)')
             break
         if ch == '2':
             MACHINE = 'backup'
+            peer_ip = MACHINE_IPS['main']
             break
         print('  enter 1 or 2.')
-
-    peer_ip = MACHINE_IPS['backup' if MACHINE == 'main' else 'main']
     sess    = _CollabSession(MACHINE, peer_ip)
 
     for name, path, best in _collab_scan_models():
@@ -1060,38 +1075,37 @@ def main():
             print('  see you later!')
         return
 
-    collab = input('  would you like to go into collab mode? (y/n): ').strip().lower()
-    if collab == 'y':
-        _collab_mode()
-        return
-
-    _select_machine()
-
-    MENU = [
-        ('train a new model (experiments A, B, C from scratch)', _train_new_model),
-        ('run a pre-trained model',                              _run_pretrained_model),
-        ('fine-tune experiment C (warm-start from existing model)', _finetune_exp_c),
-        ('quit',                                                 None),
-    ]
+    # mode selection replaces the old collab y/n + machine pick + menu loop
+    print('  mode:')
+    print('    1. solo training (experiments A, B, C)')
+    print('    2. collab mode (train with another machine)')
+    print('    3. run a pre-trained model')
+    print('    4. fine-tune experiment C')
+    print('    5. quit')
+    print()
 
     while True:
-        print('  menu:')
-        for i, (label, _) in enumerate(MENU, 1):
-            print(f'    {i}. {label}')
-
-        choice = input('\n  pick an option: ').strip()
-        try:
-            idx        = int(choice) - 1
-            label, fn  = MENU[idx]
-        except (ValueError, IndexError):
-            print('  invalid choice.\n')
-            continue
-
-        if fn is None:
+        choice = input('  pick an option: ').strip()
+        if choice == '1':
+            _select_machine()
+            _train_new_model()
+            break
+        elif choice == '2':
+            _collab_mode()
+            break
+        elif choice == '3':
+            _select_machine()
+            _run_pretrained_model()
+            break
+        elif choice == '4':
+            _select_machine()
+            _finetune_exp_c()
+            break
+        elif choice == '5':
             print('\n  goodbye.')
             break
-        fn()
-        print()
+        else:
+            print('  invalid choice.\n')
 
 
 if __name__ == '__main__':
