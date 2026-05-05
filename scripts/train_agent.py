@@ -195,7 +195,7 @@ def run_experiments(budgets=None, exploring_starts_C=True, machine=None):
     print("="*60)
 
     env_C  = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=exploring_starts_C))
-    eval_C = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=exploring_starts_C))
+    eval_C = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=False))  # eval always fixed start so scores are comparable across machines
 
     model_C = SAC(
         'MlpPolicy', env_C,
@@ -212,7 +212,7 @@ def run_experiments(budgets=None, exploring_starts_C=True, machine=None):
 
     best_dir_C = os.path.join(MODELS, tag_C + '_best_tmp')
     os.makedirs(best_dir_C, exist_ok=True)
-    stop_C = StopTrainingOnNoModelImprovement(max_no_improvement_evals=20, min_evals=5, verbose=1)
+    stop_C = StopTrainingOnNoModelImprovement(max_no_improvement_evals=50, min_evals=5, verbose=1)  # 50 instead of 20 — exp C reward is flat for a long time before it clicks
     cb_C   = EvalCallback(
         eval_C,
         best_model_save_path=best_dir_C,
@@ -255,13 +255,13 @@ def finetune_exp_c(model_path, budget=2_000_000, exploring_starts_C=False,
     print("="*60)
 
     env_C  = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=exploring_starts_C))
-    eval_C = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=exploring_starts_C))
+    eval_C = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=False))  # eval always fixed start so scores are comparable across machines
 
     model_C = SAC.load(model_path.replace('.zip', ''), env=env_C)
 
     best_dir_C = os.path.join(MODELS, tag_C + '_best_tmp')
     os.makedirs(best_dir_C, exist_ok=True)
-    stop_C = StopTrainingOnNoModelImprovement(max_no_improvement_evals=20, min_evals=5, verbose=1)
+    stop_C = StopTrainingOnNoModelImprovement(max_no_improvement_evals=50, min_evals=5, verbose=1)  # 50 instead of 20 — exp C reward is flat for a long time before it clicks
     cb_C = EvalCallback(
         eval_C,
         best_model_save_path=best_dir_C,
