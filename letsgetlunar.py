@@ -329,7 +329,7 @@ def _train_new_model():
 
     aborted = False
     try:
-        run_experiments(budgets=budgets, exploring_starts_C=exploring_starts_C)
+        run_experiments(budgets=budgets, exploring_starts_C=exploring_starts_C, machine=MACHINE)
     except KeyboardInterrupt:
         print('\n  training interrupted.')
         aborted = True
@@ -478,7 +478,7 @@ def _finetune_exp_c():
     sentinel = os.path.join(LOGS, '.finetune_mode')
     sys.path.insert(0, SCRIPTS)
     from train_agent import finetune_exp_c, next_model_tag  # noqa: PLC0415
-    next_tag = next_model_tag('C')
+    next_tag = next_model_tag('C', machine=MACHINE)
     with open(sentinel, 'w') as f:
         f.write(f'{budget} {next_tag}')
 
@@ -489,7 +489,13 @@ def _finetune_exp_c():
 
     aborted = False
     try:
-        finetune_exp_c(model_path, budget=budget, exploring_starts_C=exploring_starts_C)
+        final_path, best = finetune_exp_c(
+            model_path, budget=budget,
+            exploring_starts_C=exploring_starts_C,
+            machine=MACHINE, tag=next_tag,
+        )
+        r_s = f'{best:.1f}' if not np.isnan(best) else '?'
+        print(f'\n  saved: {os.path.basename(final_path)}  (best reward: {r_s})')
     except KeyboardInterrupt:
         print('\n  fine-tuning interrupted.')
         aborted = True
@@ -504,6 +510,23 @@ def _finetune_exp_c():
 
 def _nan2none(x):
     return None if (isinstance(x, float) and np.isnan(x)) else x
+
+
+def _reward_from_name(name):
+    """parse the best-reward integer embedded in a model filename.
+
+    Filenames produced by the new naming convention contain a ``_rNNN`` segment,
+    e.g. ``exp_C_main_003_r810_success.zip`` → 810.0.
+    Returns ``float('nan')`` when no such segment is found.
+    """
+    stem = os.path.basename(name).replace('.zip', '')
+    for part in stem.split('_'):
+        if part.startswith('r') and len(part) > 1:
+            try:
+                return float(part[1:])
+            except ValueError:
+                pass
+    return float('nan')
 
 
 class _CollabSession:
@@ -768,6 +791,9 @@ def _collab_scan_models():
         exp  = _exp_from_zip(path)
         d    = _read_eval_log(exp) if exp != '?' else None
         best = float(d['results'].mean(axis=1).max()) if d is not None else float('nan')
+        # fall back to reward encoded in the filename (new naming convention)
+        if np.isnan(best):
+            best = _reward_from_name(path)
         rows.append((os.path.basename(path), path, best))
     return rows
 
@@ -846,21 +872,18 @@ def _collab_train_loop(sess):
         try:
             sys.path.insert(0, SCRIPTS)
             from train_agent import finetune_exp_c, next_model_tag  # noqa
-            tag      = next_model_tag('C')
+            tag      = next_model_tag('C', machine=MACHINE)
             sentinel = os.path.join(LOGS, '.finetune_mode')
             with open(sentinel, 'w') as f:
                 f.write(f'{budget} {tag}')
-            finetune_exp_c(
+            final_path, best = finetune_exp_c(
                 path.replace('.zip', ''),
                 budget=budget,
                 exploring_starts_C=(MACHINE == 'main'),
+                machine=MACHINE,
+                tag=tag,
             )
-            new_zip = os.path.join(MODELS, tag + '_best.zip')
-            if not os.path.exists(new_zip):
-                new_zip = os.path.join(MODELS, tag + '.zip')
-            d    = _read_eval_log('C')
-            best = float(d['results'].mean(axis=1).max()) if d is not None else float('nan')
-            done_q.put({'tag': tag, 'path': new_zip, 'best': best})
+            done_q.put({'tag': tag, 'path': final_path, 'best': best})
         except Exception as e:
             done_q.put({'error': str(e)})
         finally:
