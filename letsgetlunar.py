@@ -1011,15 +1011,14 @@ def _collab_mode():
         ch = input('  pick 1 or 2: ').strip()
         if ch == '1':
             MACHINE = 'main'
-            peer_ip = MACHINE_IPS['backup']
-            print(f'\n  host mode: listening on port {COLLAB_PORT}, also trying {peer_ip}')
+            print(f'\n  host mode: listening on port {COLLAB_PORT}, also trying {MACHINE_IPS["backup"]}')
             print('  waiting indefinitely for auxiliary to connect (type "q" to cancel)')
             break
         if ch == '2':
             MACHINE = 'backup'
-            peer_ip = MACHINE_IPS['main']
             break
         print('  enter 1 or 2.')
+    peer_ip = MACHINE_IPS['backup' if MACHINE == 'main' else 'main']  # computed once after mode is chosen
     sess    = _CollabSession(MACHINE, peer_ip)
 
     for name, path, best in _collab_scan_models():
