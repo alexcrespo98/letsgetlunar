@@ -24,7 +24,7 @@ os.makedirs(MODELS, exist_ok=True)
 os.makedirs(LOGS,   exist_ok=True)
 
 
-SUCCESS_THRESH = {'A': -50.0, 'B': -50.0, 'C': 500.0}
+SUCCESS_THRESH = {'A': -50.0, 'B': -50.0, 'C': 500.0, 'Cstar': 500.0}
 
 
 def next_model_tag(exp, machine=None):
@@ -32,6 +32,7 @@ def next_model_tag(exp, machine=None):
 
     When *machine* is provided the tag embeds the machine name so two machines
     running concurrently cannot produce the same filename.
+    Supports multi-word exp names like 'Cstar'.
     """
     if machine:
         pattern    = os.path.join(MODELS, f'exp_{exp}_{machine}_[0-9][0-9][0-9]*.zip')
@@ -41,6 +42,10 @@ def next_model_tag(exp, machine=None):
         pattern    = os.path.join(MODELS, f'exp_{exp}_[0-9][0-9][0-9]*.zip')
         tag_prefix = f'exp_{exp}'
         num_idx    = 2  # 'exp_C_003[_r810_success]'.split('_')[2] == '003'
+
+    # Cstar filenames: exp_Cstar_main_003 or exp_Cstar_003 — the numeric part
+    # sits one index further right because 'Cstar' itself contains no underscores,
+    # so split('_') gives ['exp', 'Cstar', 'main', '003'] which matches num_idx=3.
 
     existing = glob.glob(pattern)
     nums = []
@@ -241,23 +246,71 @@ def run_experiments(budgets=None, exploring_starts_C=True, machine=None):
 
 
 def finetune_exp_c(model_path, budget=2_000_000, exploring_starts_C=False,
-                   machine=None, tag=None, success_thresh=500.0):
-    """load an existing exp C model and continue training from it.
+                   machine=None, tag=None, success_thresh=500.0,
+                   sac_kwargs=None, env_kwargs=None, exp='C'):
+    """load an existing exp C / C* model and continue training from it.
 
     Returns *(final_zip_path, best_reward)*.  The saved filename embeds the
     best evaluation reward and a ``_success`` suffix when the model meets the
     success criterion, e.g. ``exp_C_main_003_r810_success.zip``.
+
+    *sac_kwargs* — extra keyword args merged into the SAC constructor.
+                   Supports: learning_rate, buffer_size, batch_size, ent_coef,
+                   policy_kwargs (net_arch).  When *policy_kwargs* / net_arch
+                   differs from the saved model the function creates a new model
+                   with those weights randomly initialised (warm-start is skipped
+                   for architectural changes).
+    *env_kwargs* — extra keyword args forwarded to LunarOrbitEnv
+                   (reward_weights, gaussian_widths, …).
+    *exp*        — experiment name prefix ('C' or 'Cstar').
     """
-    tag_C = tag if tag is not None else next_model_tag('C', machine=machine)
+    sac_kwargs = dict(sac_kwargs) if sac_kwargs else {}
+    env_kwargs = env_kwargs or {}
+    tag_C = tag if tag is not None else next_model_tag(exp, machine=machine)
     print("\n" + "="*60)
-    print(f"FINE-TUNE EXP C: SAC | warm-start from {os.path.basename(model_path)}")
+    print(f"FINE-TUNE EXP {exp}: SAC | warm-start from {os.path.basename(model_path)}")
     print(f"model tag: {tag_C}  additional steps: {budget:,}")
     print("="*60)
 
-    env_C  = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=exploring_starts_C))
-    eval_C = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=False))  # eval always fixed start so scores are comparable across machines
+    env_C  = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=exploring_starts_C, **env_kwargs))
+    eval_C = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=False, **env_kwargs))  # eval always fixed start so scores are comparable across machines
 
-    model_C = SAC.load(model_path.replace('.zip', ''), env=env_C)
+    # split architectural kwargs (policy_kwargs / net_arch) from training kwargs
+    policy_kwargs = sac_kwargs.pop('policy_kwargs', None)
+    new_arch      = (policy_kwargs or {}).get('net_arch')
+    train_kwargs  = {k: v for k, v in sac_kwargs.items()}  # lr, buffer_size, batch_size, ent_coef …
+
+    if new_arch:
+        # architecture change: create a fresh model with the requested architecture
+        print(f"  note: new net_arch={new_arch} — creating fresh model (no warm-start)")
+        create_kwargs = dict(train_kwargs)
+        create_kwargs['policy_kwargs'] = policy_kwargs
+        model_C = SAC(
+            'MlpPolicy', env_C,
+            policy_kwargs=policy_kwargs,
+            learning_rate=create_kwargs.pop('learning_rate', 3e-4),
+            buffer_size=create_kwargs.pop('buffer_size', 500_000),
+            batch_size=create_kwargs.pop('batch_size', 256),
+            gamma=0.99,
+            tau=0.005,
+            ent_coef=create_kwargs.pop('ent_coef', 'auto'),
+            verbose=1,
+            tensorboard_log=os.path.join(LOGS, tag_C),
+            **create_kwargs,
+        )
+    else:
+        # same architecture: load weights and apply non-architectural overrides
+        custom_objects = {}
+        if 'learning_rate' in train_kwargs:
+            custom_objects['learning_rate'] = train_kwargs.pop('learning_rate')
+        if 'buffer_size' in train_kwargs:
+            custom_objects['buffer_size'] = train_kwargs.pop('buffer_size')
+        if 'batch_size' in train_kwargs:
+            custom_objects['batch_size'] = train_kwargs.pop('batch_size')
+        if 'ent_coef' in train_kwargs:
+            custom_objects['ent_coef'] = train_kwargs.pop('ent_coef')
+        model_C = SAC.load(model_path.replace('.zip', ''), env=env_C,
+                           custom_objects=custom_objects if custom_objects else None)
 
     best_dir_C = os.path.join(MODELS, tag_C + '_best_tmp')
     os.makedirs(best_dir_C, exist_ok=True)
