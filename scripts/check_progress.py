@@ -23,10 +23,10 @@ if FINETUNE_MODE:
 
 TRAIN_START = time.time()
 
-TOTAL    = {'A': 500_000, 'B': 2_000_000, 'C': 2_000_000}
-NEXT_EXP = {'A': 'B',    'B': 'C',        'C': None}
+TOTAL    = {'A': 500_000, 'B': 2_000_000, 'C': 2_000_000, 'Cstar': 2_000_000}
+NEXT_EXP = {'A': 'B',    'B': 'C',        'C': None,       'Cstar': None}
 
-SUCCESS_THRESH = {'A': -50.0, 'B': -50.0, 'C': 500.0}
+SUCCESS_THRESH = {'A': -50.0, 'B': -50.0, 'C': 500.0, 'Cstar': 500.0}
 
 
 def _find_eval_path(exp):
@@ -35,6 +35,9 @@ def _find_eval_path(exp):
         p = os.path.join('logs', FINETUNE_TAG, 'evaluations.npz')
         return p if os.path.exists(p) else None
     tagged = sorted(glob.glob(os.path.join('logs', f'exp_{exp}_[0-9][0-9][0-9]', 'evaluations.npz')))
+    # also match sweep subdirs like exp_Cstar_sweep_cfgNN_...
+    tagged += sorted(glob.glob(os.path.join('logs', f'exp_{exp}_*_[0-9][0-9][0-9]', 'evaluations.npz')))
+    tagged = sorted(set(tagged))
     plain  = os.path.join('logs', f'exp_{exp}', 'evaluations.npz')
     if tagged:
         return tagged[-1]
@@ -43,7 +46,7 @@ def _find_eval_path(exp):
 
 def _next_started(exp):
     """check whether the next experiment has any eval log."""
-    nxt = NEXT_EXP[exp]
+    nxt = NEXT_EXP.get(exp)
     if nxt is None:
         return False
     return _find_eval_path(nxt) is not None
@@ -82,6 +85,15 @@ def time_since_best(best_idx, total_evals, steps, t0):
         return f'{int(ago//3600)}h {int((ago%3600)//60)}m ago'
 
 
+def _active_exps_list():
+    """return ordered list of active experiment names for full-run mode."""
+    exps = ['A', 'B', 'C']
+    cstar_dirs = glob.glob(os.path.join('logs', 'exp_Cstar_*'))
+    if cstar_dirs:
+        exps.append('Cstar')
+    return exps
+
+
 while True:
     os.system('cls' if os.name == 'nt' else 'clear')
     print('=' * 60)
@@ -91,7 +103,7 @@ while True:
         print(f'  RL training monitor   training time: {elapsed(TRAIN_START)}')
     print('=' * 60)
 
-    active_exps = ('C',) if FINETUNE_MODE else ('A', 'B', 'C')
+    active_exps = ('C',) if FINETUNE_MODE else _active_exps_list()
     for exp in active_exps:
         p = _find_eval_path(exp)
         print(f'\n  exp {exp}', end='')

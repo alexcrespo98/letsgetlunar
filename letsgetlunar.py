@@ -43,12 +43,13 @@ BUDGETS_FULL = {'A': 500_000, 'B': 2_000_000, 'C': 2_000_000}
 BUDGETS_MIN  = {'A':  50_000, 'B':   200_000,  'C':   200_000}
 BUDGET_SHARE = {'A': 0.10,    'B': 0.40,       'C': 0.50}
 
-SUCCESS_THRESH = {'A': -50.0, 'B': -50.0, 'C': 500.0}
+SUCCESS_THRESH = {'A': -50.0, 'B': -50.0, 'C': 500.0, 'Cstar': 500.0}
 
 EXP_CONFIG = {
-    'A': ('PPO', 'sparse',        False),
-    'B': ('PPO', 'shaped',        False),
-    'C': ('SAC', 'multiobjective', True),
+    'A':     ('PPO', 'sparse',        False),
+    'B':     ('PPO', 'shaped',        False),
+    'C':     ('SAC', 'multiobjective', True),
+    'Cstar': ('SAC', 'multiobjective', True),
 }
 
 ABORT_REASONS = [
@@ -130,8 +131,11 @@ def _read_eval_log(exp):
 
 
 def _exp_from_zip(path):
-    """guess exp letter (A/B/C) from a model zip path."""
+    """guess exp letter (A/B/C/Cstar) from a model zip path."""
     base = os.path.basename(path)
+    # Cstar must be checked before single-letter match
+    if base.startswith('exp_Cstar_'):
+        return 'Cstar'
     # new style: exp_A_001.zip
     if base.startswith('exp_') and len(base) >= 6 and base[4] in 'ABC':
         return base[4]
@@ -154,41 +158,44 @@ def _all_model_zips():
 
 
 def _launch_monitor():
-    """launch scripts/check_progress.py in a separate terminal (background)."""
-    script = os.path.join(SCRIPTS, 'check_progress.py')
+    """launch scripts/check_progress.py and scripts/gui_monitor.py in separate processes."""
+    check_script = os.path.join(SCRIPTS, 'check_progress.py')
+    gui_script   = os.path.join(SCRIPTS, 'gui_monitor.py')
 
     if MACHINE == 'backup':
-        try:
-            subprocess.Popen(['bash', '-c', f'python3 {script}'], start_new_session=True)
-        except Exception as exc:
-            print(f'  note: could not launch monitor ({exc}). run scripts/check_progress.py manually.')
+        for script in (check_script, gui_script):
+            try:
+                subprocess.Popen(['bash', '-c', f'python3 {script}'], start_new_session=True)
+            except Exception as exc:
+                print(f'  note: could not launch {os.path.basename(script)} ({exc}). run it manually.')
         return
 
     plat = platform.system()
-    try:
-        if plat == 'Windows':
-            subprocess.Popen(
-                ['start', 'cmd', '/k', sys.executable, script],
-                shell=True
-            )
-        elif plat == 'Darwin':
-            subprocess.Popen([
-                'osascript', '-e',
-                f'tell app "Terminal" to do script "{sys.executable} {script}"'
-            ])
-        else:
-            launched = False
-            for term in ['xterm', 'gnome-terminal', 'xfce4-terminal']:
-                try:
-                    subprocess.Popen([term, '-e', f'{sys.executable} {script}'])
-                    launched = True
-                    break
-                except FileNotFoundError:
-                    continue
-            if not launched:
-                print('  note: could not auto-launch monitor. run scripts/check_progress.py manually.')
-    except Exception as exc:
-        print(f'  note: could not launch monitor ({exc}). run scripts/check_progress.py manually.')
+    for script in (check_script, gui_script):
+        try:
+            if plat == 'Windows':
+                subprocess.Popen(
+                    ['start', 'cmd', '/k', sys.executable, script],
+                    shell=True
+                )
+            elif plat == 'Darwin':
+                subprocess.Popen([
+                    'osascript', '-e',
+                    f'tell app "Terminal" to do script "{sys.executable} {script}"'
+                ])
+            else:
+                launched = False
+                for term in ['xterm', 'gnome-terminal', 'xfce4-terminal']:
+                    try:
+                        subprocess.Popen([term, '-e', f'{sys.executable} {script}'])
+                        launched = True
+                        break
+                    except FileNotFoundError:
+                        continue
+                if not launched:
+                    print(f'  note: could not auto-launch {os.path.basename(script)}. run it manually.')
+        except Exception as exc:
+            print(f'  note: could not launch {os.path.basename(script)} ({exc}). run it manually.')
 
 
 # ── log attempt ───────────────────────────────────────────────────────────────
@@ -506,6 +513,294 @@ def _finetune_exp_c():
     _log_attempt(aborted, budgets={'A': 0, 'B': 0, 'C': budget})
 
 
+# ── hyperparameter sweep ──────────────────────────────────────────────────────
+
+# pre-defined sweep configs (Latin hypercube sample of the parameter space)
+SWEEP_CONFIGS = [
+    {'id': 'cfg_01', 'lr': 3e-4,  'net_arch': [128, 128],     'buffer_size': 500_000,   'ent_coef': 'auto', 'batch_size': 256, 'reward_weights': (0.4, 0.3, 0.3),    'gaussian_widths': (50.0, 200.0, 200.0)},
+    {'id': 'cfg_02', 'lr': 1e-3,  'net_arch': [256, 256],     'buffer_size': 1_000_000, 'ent_coef': 'auto', 'batch_size': 512, 'reward_weights': (0.4, 0.3, 0.3),    'gaussian_widths': (50.0, 200.0, 200.0)},
+    {'id': 'cfg_03', 'lr': 1e-3,  'net_arch': [256, 256],     'buffer_size': 1_000_000, 'ent_coef': 'auto', 'batch_size': 256, 'reward_weights': (0.5, 0.25, 0.25),  'gaussian_widths': (50.0, 200.0, 200.0)},
+    {'id': 'cfg_04', 'lr': 3e-4,  'net_arch': [256, 128, 64], 'buffer_size': 1_000_000, 'ent_coef': 0.1,   'batch_size': 256, 'reward_weights': (0.4, 0.3, 0.3),    'gaussian_widths': (30.0, 200.0, 200.0)},
+    {'id': 'cfg_05', 'lr': 1e-4,  'net_arch': [256, 256],     'buffer_size': 500_000,   'ent_coef': 0.2,   'batch_size': 256, 'reward_weights': (0.33, 0.33, 0.34), 'gaussian_widths': (50.0, 200.0, 200.0)},
+    {'id': 'cfg_06', 'lr': 1e-3,  'net_arch': [128, 128],     'buffer_size': 1_000_000, 'ent_coef': 0.1,   'batch_size': 512, 'reward_weights': (0.5, 0.25, 0.25),  'gaussian_widths': (30.0, 200.0, 200.0)},
+    {'id': 'cfg_07', 'lr': 3e-4,  'net_arch': [256, 256],     'buffer_size': 500_000,   'ent_coef': 'auto', 'batch_size': 512, 'reward_weights': (0.33, 0.33, 0.34), 'gaussian_widths': (50.0, 200.0, 200.0)},
+    {'id': 'cfg_08', 'lr': 1e-4,  'net_arch': [128, 128],     'buffer_size': 500_000,   'ent_coef': 0.2,   'batch_size': 512, 'reward_weights': (0.4, 0.3, 0.3),    'gaussian_widths': (30.0, 200.0, 200.0)},
+    {'id': 'cfg_09', 'lr': 1e-4,  'net_arch': [256, 128, 64], 'buffer_size': 1_000_000, 'ent_coef': 'auto', 'batch_size': 256, 'reward_weights': (0.5, 0.25, 0.25),  'gaussian_widths': (30.0, 200.0, 200.0)},
+    {'id': 'cfg_10', 'lr': 1e-3,  'net_arch': [256, 128, 64], 'buffer_size': 500_000,   'ent_coef': 0.1,   'batch_size': 512, 'reward_weights': (0.33, 0.33, 0.34), 'gaussian_widths': (50.0, 200.0, 200.0)},
+]
+
+
+def _cfg_summary_str(cfg):
+    """return compact one-line description of a sweep config."""
+    rw = cfg['reward_weights']
+    gw = cfg['gaussian_widths']
+    na = 'x'.join(str(n) for n in cfg['net_arch'])
+    ec = cfg['ent_coef'] if isinstance(cfg['ent_coef'], str) else f"{cfg['ent_coef']:.2f}"
+    return (f"lr={cfg['lr']:.0e}  net={na}  buf={cfg['buffer_size']//1000}k  "
+            f"ent={ec}  bs={cfg['batch_size']}  "
+            f"rw={rw[0]:.2f}/{rw[1]:.2f}/{rw[2]:.2f}  "
+            f"galt={gw[0]:.0f}")
+
+
+def _best_base_model():
+    """return path of best available C or Cstar model to warm-start from, or None."""
+    all_zips = _all_model_zips()
+    best_r   = float('-inf')
+    best_p   = None
+    for z in all_zips:
+        exp = _exp_from_zip(z)
+        if exp not in ('C', 'Cstar'):
+            continue
+        r = _reward_from_name(z)
+        if np.isnan(r):
+            # try reading eval log
+            d = _read_eval_log(exp)
+            if d is not None:
+                r = float(d['results'].mean(axis=1).max())
+        if not np.isnan(r) and r > best_r:
+            best_r = r
+            best_p = z
+    return best_p
+
+
+def _run_sweep():
+    """run hyperparameter sweep over exp C* configs."""
+    print('\nhyperparameter sweep (exp C*)')
+    print()
+
+    # — time budget —
+    while True:
+        hrs_str = input('  how many hours total for the sweep? (suggested: 2-4 hours): ').strip()
+        try:
+            total_hours = float(hrs_str)
+            if total_hours > 0:
+                break
+        except ValueError:
+            pass
+        print('  enter a positive number.')
+
+    # — number of configs —
+    max_cfgs = len(SWEEP_CONFIGS)
+    while True:
+        n_str = input(f'  how many configs to test? (suggested: 6-10, max {max_cfgs}): ').strip()
+        try:
+            n_cfgs = int(n_str)
+            if 1 <= n_cfgs <= max_cfgs:
+                break
+        except ValueError:
+            pass
+        print(f'  enter a number between 1 and {max_cfgs}.')
+
+    configs  = SWEEP_CONFIGS[:n_cfgs]
+    per_cfg_hours = total_hours / n_cfgs
+    per_cfg_steps = _snap(per_cfg_hours * STEPS_PER_HOUR)
+    per_cfg_steps = max(per_cfg_steps, 50_000)
+
+    print(f'\n  {n_cfgs} configs × {per_cfg_steps/1e6:.2f}M steps each '
+          f'({per_cfg_hours*60:.0f} min/config)')
+    print()
+
+    base_model = _best_base_model()
+    if base_model is None:
+        print('  no exp C or C* models found. train a base model first (option 4).')
+        return
+    print(f'  warm-starting all configs from: {os.path.basename(base_model)}')
+    print()
+
+    sys.path.insert(0, SCRIPTS)
+    from train_agent import finetune_exp_c, next_model_tag  # noqa: PLC0415
+
+    # write sweep results CSV header
+    sweep_csv = os.path.join(LOGS, 'sweep_results.csv')
+    csv_fields = [
+        'config_id', 'learning_rate', 'net_arch', 'buffer_size', 'ent_coef',
+        'batch_size', 'reward_weights', 'gaussian_alt_width', 'steps', 'best_reward',
+    ]
+    csv_exists = os.path.exists(sweep_csv)
+
+    results = []  # (cfg, best_reward, steps, tag)
+
+    for i, cfg in enumerate(configs, 1):
+        cid = cfg['id']
+        print(f'  ── config {i}/{n_cfgs}: {cid} ──────────────────────────────')
+        print(f'     {_cfg_summary_str(cfg)}')
+
+        next_tag = next_model_tag('Cstar', machine=MACHINE)
+        sentinel = os.path.join(LOGS, '.finetune_mode')
+        with open(sentinel, 'w') as f:
+            f.write(f'{per_cfg_steps} {next_tag}')
+
+        sac_kw = {
+            'learning_rate': cfg['lr'],
+            'buffer_size':   cfg['buffer_size'],
+            'batch_size':    cfg['batch_size'],
+            'ent_coef':      cfg['ent_coef'],
+            'policy_kwargs': {'net_arch': cfg['net_arch']},
+        }
+        env_kw = {
+            'reward_weights':  cfg['reward_weights'],
+            'gaussian_widths': cfg['gaussian_widths'],
+        }
+
+        try:
+            final_path, best = finetune_exp_c(
+                base_model,
+                budget=per_cfg_steps,
+                exploring_starts_C=(MACHINE != 'backup'),
+                machine=MACHINE,
+                tag=next_tag,
+                success_thresh=SUCCESS_THRESH['Cstar'],
+                sac_kwargs=sac_kw,
+                env_kwargs=env_kw,
+                exp='Cstar',
+            )
+            r_s = f'{best:.1f}' if not np.isnan(best) else '?'
+            print(f'  config {cid} done → {os.path.basename(final_path)}  (best: {r_s})')
+        except KeyboardInterrupt:
+            print(f'\n  sweep interrupted at {cid}.')
+            if os.path.exists(sentinel):
+                os.remove(sentinel)
+            break
+        except Exception as e:
+            print(f'  config {cid} error: {e}')
+            best = float('nan')
+            final_path = ''
+        finally:
+            if os.path.exists(sentinel):
+                os.remove(sentinel)
+
+        steps_done = per_cfg_steps
+        results.append((cfg, best, steps_done, next_tag))
+
+        # append to CSV
+        try:
+            rw = cfg['reward_weights']
+            row = {
+                'config_id':         cid,
+                'learning_rate':     cfg['lr'],
+                'net_arch':          'x'.join(str(n) for n in cfg['net_arch']),
+                'buffer_size':       cfg['buffer_size'],
+                'ent_coef':          cfg['ent_coef'],
+                'batch_size':        cfg['batch_size'],
+                'reward_weights':    f"{rw[0]:.2f}/{rw[1]:.2f}/{rw[2]:.2f}",
+                'gaussian_alt_width': cfg['gaussian_widths'][0],
+                'steps':             steps_done,
+                'best_reward':       f'{best:.1f}' if not np.isnan(best) else '?',
+            }
+            with open(sweep_csv, 'a', newline='') as f:
+                w = csv.DictWriter(f, fieldnames=csv_fields)
+                if not csv_exists:
+                    w.writeheader()
+                    csv_exists = True
+                w.writerow(row)
+        except Exception:
+            pass
+
+    if not results:
+        print('\n  no sweep results to summarize.')
+        return
+
+    # — ranked summary —
+    print('\n' + '='*70)
+    print('  sweep summary (ranked by best reward)')
+    print('='*70)
+    sorted_results = sorted(results, key=lambda x: x[1] if not np.isnan(x[1]) else float('-inf'), reverse=True)
+    print(f"  {'rank':>4}  {'config':<8}  {'best_reward':>11}  {'steps':>8}  {''}")
+    print(f"  {'----':>4}  {'------':<8}  {'-----------':>11}  {'------':>8}")
+    for rank, (cfg, best, steps, tag) in enumerate(sorted_results, 1):
+        r_s = f'{best:.1f}' if not np.isnan(best) else 'n/a'
+        print(f"  {rank:>4}  {cfg['id']:<8}  {r_s:>11}  {steps:>8,}  {_cfg_summary_str(cfg)}")
+
+    best_cfg, best_r, _, _ = sorted_results[0]
+    print()
+    print(f"  i suggest config {best_cfg['id']} (best reward: {best_r:.1f}).")
+    print()
+    print('  which config do you choose?')
+    print(f'  (enter number 1-{len(sorted_results)}, or press enter for suggestion):')
+    choice_str = input('  > ').strip()
+
+    chosen_cfg = best_cfg  # default: suggestion
+    if choice_str:
+        try:
+            chosen_idx = int(choice_str) - 1
+            chosen_cfg = sorted_results[chosen_idx][0]
+        except (ValueError, IndexError):
+            print('  invalid choice. using suggestion.')
+
+    print(f"\n  selected: {chosen_cfg['id']}")
+    print(f'  {_cfg_summary_str(chosen_cfg)}')
+    print()
+
+    collab_ans = input('  are we collaborating on this one? (y/n): ').strip().lower()
+    if collab_ans == 'y':
+        print(f"\n  starting collab mode with config {chosen_cfg['id']}.")
+        print(f"  make sure the other machine also runs the sweep and selects {chosen_cfg['id']},")
+        print('  or runs collab mode and accepts the incoming config.')
+        _collab_mode(config_id=chosen_cfg['id'], exp_type='Cstar', sweep_cfg=chosen_cfg)
+    else:
+        # solo: immediately fine-tune with chosen params
+        print(f"\n  starting solo fine-tune with {chosen_cfg['id']}...")
+        base = _best_base_model()
+        if base is None:
+            print('  no base model found. aborting.')
+            return
+        next_tag = next_model_tag('Cstar', machine=MACHINE)
+        sentinel = os.path.join(LOGS, '.finetune_mode')
+
+        # use full budget for the chosen config
+        solo_hours_str = input('  how many hours to train? (enter for 2M steps): ').strip()
+        if solo_hours_str:
+            try:
+                solo_budget = int(float(solo_hours_str) * STEPS_PER_HOUR)
+                solo_budget = max(solo_budget, 50_000)
+            except ValueError:
+                solo_budget = 2_000_000
+        else:
+            solo_budget = 2_000_000
+
+        with open(sentinel, 'w') as f:
+            f.write(f'{solo_budget} {next_tag}')
+
+        print('\n  launching training monitor in background...')
+        _launch_monitor()
+
+        sac_kw = {
+            'learning_rate': chosen_cfg['lr'],
+            'buffer_size':   chosen_cfg['buffer_size'],
+            'batch_size':    chosen_cfg['batch_size'],
+            'ent_coef':      chosen_cfg['ent_coef'],
+            'policy_kwargs': {'net_arch': chosen_cfg['net_arch']},
+        }
+        env_kw = {
+            'reward_weights':  chosen_cfg['reward_weights'],
+            'gaussian_widths': chosen_cfg['gaussian_widths'],
+        }
+
+        aborted = False
+        try:
+            final_path, best = finetune_exp_c(
+                base,
+                budget=solo_budget,
+                exploring_starts_C=(MACHINE != 'backup'),
+                machine=MACHINE,
+                tag=next_tag,
+                success_thresh=SUCCESS_THRESH['Cstar'],
+                sac_kwargs=sac_kw,
+                env_kwargs=env_kw,
+                exp='Cstar',
+            )
+            r_s = f'{best:.1f}' if not np.isnan(best) else '?'
+            print(f'\n  saved: {os.path.basename(final_path)}  (best reward: {r_s})')
+        except KeyboardInterrupt:
+            print('\n  training interrupted.')
+            aborted = True
+        finally:
+            if os.path.exists(sentinel):
+                os.remove(sentinel)
+
+        _log_attempt(aborted, budgets={'A': 0, 'B': 0, 'C': 0, 'Cstar': solo_budget})
+
+
 # ── collab mode ───────────────────────────────────────────────────────────────
 
 def _nan2none(x):
@@ -532,10 +827,14 @@ def _reward_from_name(name):
 class _CollabSession:
     """manages the socket connection and shared model pot for collab mode."""
 
-    def __init__(self, machine, peer_ip):
+    def __init__(self, machine, peer_ip, config_id=None, exp_type='C'):
         self.machine      = machine
         self.peer_ip      = peer_ip       # may be changed by UI thread at any time
         self.peer_machine = None
+        self.peer_config  = None          # config_id reported by peer in hello
+        self.config_id    = config_id     # our config ('cfg_03', …) or None for C defaults
+        self.exp_type     = exp_type      # 'C' or 'Cstar'
+        self.config_mismatch = False      # set True if peer uses a different config
         self.connected    = False
         self.stopped      = False
         self.status       = f'trying {peer_ip}:{COLLAB_PORT}...'
@@ -672,7 +971,8 @@ class _CollabSession:
                 {'name': n, 'best_reward': _nan2none(i['best_reward'])}
                 for n, i in self._pot.items() if i.get('local_path')
             ]
-        sock.sendall((json.dumps({'type': 'hello', 'machine': self.machine}) + '\n').encode())
+        hello = {'type': 'hello', 'machine': self.machine, 'config_id': self.config_id, 'exp_type': self.exp_type}
+        sock.sendall((json.dumps(hello) + '\n').encode())
         sock.sendall((json.dumps({'type': 'model_list', 'models': local}) + '\n').encode())
 
         buf = ''
@@ -703,8 +1003,16 @@ class _CollabSession:
         t = msg.get('type')
         if t == 'hello':
             self.peer_machine = msg.get('machine', 'peer')
+            self.peer_config  = msg.get('config_id')
             self.connected    = True
             self.status       = f'connected to {self.peer_machine} @ {self.peer_ip}'
+            # check config compatibility
+            if self.config_id != self.peer_config:
+                ours   = self.config_id   or 'exp C defaults'
+                theirs = self.peer_config or 'exp C defaults'
+                self.config_mismatch = True
+                print(f'\n  warning: peer is using a different config '
+                      f'(theirs: {theirs}, ours: {ours}). models will not be shared.')
             self._msg_q.put(msg)
 
         elif t == 'model_list':
@@ -756,6 +1064,8 @@ class _CollabSession:
     def _serve(self, sock, name):
         if not name:
             return
+        if self.config_mismatch:
+            return  # refuse to share models with a mismatched config peer
         with self._pot_lock:
             info = dict(self._pot.get(name, {}))
         path = info.get('local_path')
@@ -783,14 +1093,25 @@ class _CollabSession:
             print(f'\n  failed to save {name}: {e}')
 
 
-def _collab_scan_models():
-    """return (name, path, best_reward) for all model zips, preferring _best.zip."""
+def _collab_scan_models(exp_filter=None):
+    """return (name, path, best_reward) for model zips, preferring _best.zip.
+
+    *exp_filter* — when set to 'C' or 'Cstar', only return models for that
+    experiment type so the two pot namespaces never mix.
+    """
     all_zips = glob.glob(os.path.join(MODELS, '**', '*.zip'), recursive=True)
     by_base  = {}
     for z in all_zips:
         base_name = os.path.basename(z)
         if 'best_model' in base_name:
             continue
+        # apply exp filter
+        if exp_filter is not None:
+            exp = _exp_from_zip(z)
+            if exp_filter == 'C' and exp != 'C':
+                continue
+            if exp_filter == 'Cstar' and exp != 'Cstar':
+                continue
         is_best = base_name.endswith('_best.zip')
         base_key = base_name.replace('_best.zip', '').replace('.zip', '')
         existing = by_base.get(base_key)
@@ -811,6 +1132,8 @@ def _collab_scan_models():
 
 def _collab_print_pot(sess):
     pot = sess.pot_snapshot()
+    cfg_label = sess.config_id or 'exp C defaults'
+    print(f'  model pot ({cfg_label}):')
     if not pot:
         print('  (pot is empty)')
         return
@@ -865,13 +1188,15 @@ def _collab_wait_for_connect(sess):
     return sess.connected
 
 
-def _collab_train_loop(sess):
+def _collab_train_loop(sess, sweep_cfg=None):
     """coordinate fine-tuning with peer — picks best model, trains, shares results."""
     done_q   = queue.Queue()
     cmd_q    = queue.Queue()
     current  = None
     training = False
     pending_requests = set()  # models we've requested but not yet received, to avoid re-requesting each tick
+
+    exp_type = sess.exp_type  # 'C' or 'Cstar'
 
     def _reader():
         while not sess.stopped:
@@ -884,16 +1209,32 @@ def _collab_train_loop(sess):
         try:
             sys.path.insert(0, SCRIPTS)
             from train_agent import finetune_exp_c, next_model_tag  # noqa
-            tag      = next_model_tag('C', machine=MACHINE)
+            tag      = next_model_tag(exp_type, machine=MACHINE)
             sentinel = os.path.join(LOGS, '.finetune_mode')
             with open(sentinel, 'w') as f:
                 f.write(f'{budget} {tag}')
+            kw = {}
+            if sweep_cfg:
+                kw['sac_kwargs'] = {
+                    'learning_rate': sweep_cfg['lr'],
+                    'buffer_size':   sweep_cfg['buffer_size'],
+                    'batch_size':    sweep_cfg['batch_size'],
+                    'ent_coef':      sweep_cfg['ent_coef'],
+                    'policy_kwargs': {'net_arch': sweep_cfg['net_arch']},
+                }
+                kw['env_kwargs'] = {
+                    'reward_weights':  sweep_cfg['reward_weights'],
+                    'gaussian_widths': sweep_cfg['gaussian_widths'],
+                }
             final_path, best = finetune_exp_c(
                 path.replace('.zip', ''),
                 budget=budget,
                 exploring_starts_C=True,  # train env uses exploring starts; eval env is always fixed (handled in train_agent.py)
                 machine=MACHINE,
                 tag=tag,
+                success_thresh=SUCCESS_THRESH.get(exp_type, 500.0),
+                exp=exp_type,
+                **kw,
             )
             done_q.put({'tag': tag, 'path': final_path, 'best': best})
         except Exception as e:
@@ -977,7 +1318,7 @@ def _collab_train_loop(sess):
             pass
 
         # start training if idle — both machines can train the same base model simultaneously (different seeds → both useful)
-        if not training:
+        if not training and not sess.config_mismatch:
             name, info = sess.best_available()
             if name and info:
                 local_path = info.get('local_path')
@@ -997,8 +1338,13 @@ def _collab_train_loop(sess):
         time.sleep(0.5)
 
 
-def _collab_mode():
-    """peer-to-peer collab training entry point."""
+def _collab_mode(config_id=None, exp_type='C', sweep_cfg=None):
+    """peer-to-peer collab training entry point.
+
+    *config_id*  — sweep config ID string ('cfg_03') or None for exp C defaults.
+    *exp_type*   — 'C' or 'Cstar'; controls which model files are visible in the pot.
+    *sweep_cfg*  — full sweep config dict to pass through to fine-tuning, or None.
+    """
     global MACHINE
     print()
     print('  collab mode')
@@ -1019,9 +1365,9 @@ def _collab_mode():
             break
         print('  enter 1 or 2.')
     peer_ip = MACHINE_IPS['backup' if MACHINE == 'main' else 'main']  # computed once after mode is chosen
-    sess    = _CollabSession(MACHINE, peer_ip)
+    sess    = _CollabSession(MACHINE, peer_ip, config_id=config_id, exp_type=exp_type)
 
-    for name, path, best in _collab_scan_models():
+    for name, path, best in _collab_scan_models(exp_filter=exp_type):
         sess.set_pot(name, best_reward=best, local_path=path, being_trained=False)
 
     print(f'\n  looking for peer at {peer_ip}:{COLLAB_PORT}...')
@@ -1036,10 +1382,12 @@ def _collab_mode():
     print('\n  current model pot:')
     _collab_print_pot(sess)
     print()
+    if sess.config_mismatch:
+        print('  (config mismatch detected — model sharing is disabled)')
     print('  training starting — type "pot" to refresh, "status" for connection info, "q" to quit')
     print()
 
-    _collab_train_loop(sess)
+    _collab_train_loop(sess, sweep_cfg=sweep_cfg)
     sess.stop()
     print('  collab mode ended.')
 
@@ -1081,6 +1429,7 @@ def main():
     print('    3. run a pre-trained model')
     print('    4. fine-tune experiment C')
     print('    5. quit')
+    print('    6. hyperparameter sweep (exp C*)')
     print()
 
     while True:
@@ -1102,6 +1451,10 @@ def main():
             break
         elif choice == '5':
             print('\n  goodbye.')
+            break
+        elif choice == '6':
+            _select_machine()
+            _run_sweep()
             break
         else:
             print('  invalid choice.\n')

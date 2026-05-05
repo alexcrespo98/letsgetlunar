@@ -46,11 +46,14 @@ TOL_VT  = 100.0
 class LunarOrbitEnv(gym.Env):
     metadata = {'render_modes': []}
 
-    def __init__(self, reward_fn='shaped', exploring_starts=False):
+    def __init__(self, reward_fn='shaped', exploring_starts=False,
+                 reward_weights=(0.4, 0.3, 0.3), gaussian_widths=(50.0, 200.0, 200.0)):
         super().__init__()
         assert reward_fn in ('sparse', 'shaped', 'multiobjective')
         self.reward_fn        = reward_fn
         self.exploring_starts = exploring_starts
+        self.reward_weights   = tuple(reward_weights)    # (w_alt, w_vr, w_vtan)
+        self.gaussian_widths  = tuple(gaussian_widths)   # (sig_alt_km, sig_vr, sig_vtan)
 
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32
@@ -209,14 +212,17 @@ class LunarOrbitEnv(gym.Env):
         vtan_err   = abs(self.state[3] - VC)
         dbeta_deg  = np.degrees(abs(self.delta_beta))
 
-        g_alt  = np.exp(-0.5 * (alt_err_km / 50.0)**2)
-        g_vr   = np.exp(-0.5 * (vr_err     / 200.0)**2)
-        g_vtan = np.exp(-0.5 * (vtan_err   / 200.0)**2)
+        w_alt, w_vr, w_vtan           = self.reward_weights
+        sig_alt, sig_vr, sig_vtan     = self.gaussian_widths
+
+        g_alt  = np.exp(-0.5 * (alt_err_km / sig_alt )**2)
+        g_vr   = np.exp(-0.5 * (vr_err     / sig_vr  )**2)
+        g_vtan = np.exp(-0.5 * (vtan_err   / sig_vtan)**2)
 
         r_cont = -0.10 * (dbeta_deg / 90.0)**2
         r_time = -0.001
 
-        reward = 0.4*g_alt + 0.3*g_vr + 0.3*g_vtan + r_cont + r_time
+        reward = w_alt*g_alt + w_vr*g_vr + w_vtan*g_vtan + r_cont + r_time
 
         if success:
             reward += 1000.0
