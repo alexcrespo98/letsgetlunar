@@ -38,14 +38,12 @@ def next_model_tag(exp, machine=None):
         pattern    = os.path.join(MODELS, f'exp_{exp}_{machine}_[0-9][0-9][0-9]*.zip')
         tag_prefix = f'exp_{exp}_{machine}'
         num_idx    = 3  # 'exp_C_main_003[_r810_success]'.split('_')[3] == '003'
+                        # 'exp_Cstar_main_003[...]'.split('_')[3] == '003' (same index)
     else:
         pattern    = os.path.join(MODELS, f'exp_{exp}_[0-9][0-9][0-9]*.zip')
         tag_prefix = f'exp_{exp}'
         num_idx    = 2  # 'exp_C_003[_r810_success]'.split('_')[2] == '003'
-
-    # Cstar filenames: exp_Cstar_main_003 or exp_Cstar_003 — the numeric part
-    # sits one index further right because 'Cstar' itself contains no underscores,
-    # so split('_') gives ['exp', 'Cstar', 'main', '003'] which matches num_idx=3.
+                        # 'exp_Cstar_003[...]'.split('_')[2] == '003' (same index)
 
     existing = glob.glob(pattern)
     nums = []
@@ -278,7 +276,7 @@ def finetune_exp_c(model_path, budget=2_000_000, exploring_starts_C=False,
     # split architectural kwargs (policy_kwargs / net_arch) from training kwargs
     policy_kwargs = sac_kwargs.pop('policy_kwargs', None)
     new_arch      = (policy_kwargs or {}).get('net_arch')
-    train_kwargs  = {k: v for k, v in sac_kwargs.items()}  # lr, buffer_size, batch_size, ent_coef …
+    train_kwargs  = sac_kwargs  # lr, buffer_size, batch_size, ent_coef (policy_kwargs already popped)
 
     if new_arch:
         # architecture change: create a fresh model with the requested architecture

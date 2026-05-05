@@ -9,7 +9,7 @@ import time
 
 try:
     import matplotlib
-    matplotlib.use('TkAgg' if os.name == 'nt' else 'TkAgg')  # works on Windows + Linux
+    matplotlib.use('TkAgg')
     import matplotlib.pyplot as plt
     import matplotlib.dates as mdates
     from matplotlib.animation import FuncAnimation
@@ -157,8 +157,7 @@ def main():
         wall = _steps_to_wallclock(steps, mtime)
 
         # scatter: all eval points
-        import matplotlib.dates as _md
-        xdata = _md.date2num(wall)
+        xdata = mdates.date2num(wall)
         scat.set_offsets(np.column_stack([xdata, means]))
 
         # best-so-far step line

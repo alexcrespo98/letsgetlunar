@@ -716,7 +716,7 @@ def _run_sweep():
     print(f"  i suggest config {best_cfg['id']} (best reward: {best_r:.1f}).")
     print()
     print('  which config do you choose?')
-    print('  (enter number 1-{}, or press enter for suggestion):'.format(len(sorted_results)))
+    print(f'  (enter number 1-{len(sorted_results)}, or press enter for suggestion):')
     choice_str = input('  > ').strip()
 
     chosen_cfg = best_cfg  # default: suggestion
@@ -1121,7 +1121,7 @@ def _collab_scan_models(exp_filter=None):
     rows = []
     for base_key, (path, _) in by_base.items():
         exp  = _exp_from_zip(path)
-        d    = _read_eval_log(exp) if exp not in ('?',) else None
+        d    = _read_eval_log(exp) if exp != '?' else None
         best = float(d['results'].mean(axis=1).max()) if d is not None else float('nan')
         # fall back to reward encoded in the filename (new naming convention)
         if np.isnan(best):
