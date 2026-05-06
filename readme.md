@@ -114,8 +114,6 @@ next step: build a proper live GUI for each machine, a window that stays open wh
 
 i also tried running parallel training on the windows machine. since it has 12 physical cores the idea was to spawn 8 or 10 workers simultaneously, each with a different random seed, and let them all race to find the best config. it worked in terms of producing models, but it immediately pegged every core at 100 percent and the machine ran way too hot. had to kill it after a few minutes. not worth the thermal risk, so i went back to the single-worker approach and leaned harder on the two-machine collab pot instead.
 
-i then looked into different ways to optimize my current setup on the windows machine and found that since it has 12 physical cores i could theoretically run 10 parallel workers and get roughly 10x the training throughput overnight. then the machine started getting hot, so i did some research on how to control cpu throttling, figuring out which power plan settings and core limits let me maximize training speed without cooking the hardware.
-
 ## status
 
 plateau reached. best reward so far: ~850. target is consistent orbit at 400 km altitude (success threshold: 500 reward). both machines have been running collab mode; next move is a live GUI dashboard per machine and a hyperparameter sweep to try to push past the plateau.
