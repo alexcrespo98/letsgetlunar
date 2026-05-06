@@ -328,7 +328,7 @@ def _train_new_model():
     _launch_monitor()
 
     sys.path.insert(0, SCRIPTS)
-    from train_agent import run_experiments  # noqa: PLC0415
+    from train_agent import run_experiments
 
     exploring_starts_C = True
     if MACHINE == 'backup':
@@ -392,12 +392,12 @@ def _run_pretrained_model():
     algo_name, reward_fn, exploring_starts = config
 
     sys.path.insert(0, SCRIPTS)
-    from lunar_env import LunarOrbitEnv, VC  # noqa: PLC0415
+    from lunar_env import LunarOrbitEnv, VC
 
     if algo_name == 'PPO':
-        from stable_baselines3 import PPO as AlgoClass  # noqa: PLC0415
+        from stable_baselines3 import PPO as AlgoClass
     else:
-        from stable_baselines3 import SAC as AlgoClass  # noqa: PLC0415
+        from stable_baselines3 import SAC as AlgoClass
 
     model_path = z.replace('.zip', '')
     print(f'\n  loading {label}...')
@@ -483,7 +483,7 @@ def _finetune_exp_c():
     # write sentinel so monitor knows which tag dir to watch
     sentinel = os.path.join(LOGS, '.finetune_mode')
     sys.path.insert(0, SCRIPTS)
-    from train_agent import finetune_exp_c, next_model_tag  # noqa: PLC0415
+    from train_agent import finetune_exp_c, next_model_tag
     next_tag = next_model_tag('C', machine=MACHINE)
     with open(sentinel, 'w') as f:
         f.write(f'{budget} {next_tag}')
@@ -538,7 +538,6 @@ SWEEP_CONFIGS = [
 
 
 def _cfg_summary_str(cfg):
-    """return compact one-line description of a sweep config."""
     rw = cfg['reward_weights']
     gw = cfg['gaussian_widths']
     na = 'x'.join(str(n) for n in cfg['net_arch'])
@@ -550,7 +549,6 @@ def _cfg_summary_str(cfg):
 
 
 def _best_base_model():
-    """return path of best available C or Cstar model to warm-start from, or None."""
     all_zips = _all_model_zips()
     best_r   = float('-inf')
     best_p   = None
@@ -570,9 +568,8 @@ def _best_base_model():
     return best_p
 
 
-def _next_worker_tag(machine, worker_num):
-    """return next available tag for parallel worker N."""
-    prefix = f'exp_Cstar_{machine}_w{worker_num:02d}_'
+def _next_worker_tag(machine, cfg_id):
+    prefix = f'exp_Cstar_{machine}_{cfg_id}_'
     pattern = os.path.join(MODELS, f'{prefix}[0-9][0-9][0-9]*.zip')
     existing = glob.glob(pattern)
     nums = []
@@ -589,7 +586,6 @@ def _next_worker_tag(machine, worker_num):
 
 
 def _run_sweep():
-    """run parallel hyperparameter sweep over exp C* configs (one process per config)."""
     try:
         import psutil
         phys_cores = psutil.cpu_count(logical=False) or 4
@@ -599,7 +595,6 @@ def _run_sweep():
     print('\nhyperparameter sweep (exp C*)')
     print()
 
-    # — time budget —
     hrs_str = input('  how many hours total for the sweep? [3]: ').strip()
     try:
         total_hours = float(hrs_str) if hrs_str else 3.0
@@ -608,7 +603,6 @@ def _run_sweep():
     except ValueError:
         total_hours = 3.0
 
-    # — number of configs to run simultaneously —
     max_cfgs = len(SWEEP_CONFIGS)
     default_cfgs = min(max_cfgs, phys_cores)
     n_str = input(f'  how many configs to test? [{default_cfgs}, max {max_cfgs}]: ').strip()
@@ -632,16 +626,11 @@ def _run_sweep():
     print(f'  warm-starting all configs from: {os.path.basename(base_model)}')
     print()
 
-    sys.path.insert(0, SCRIPTS)
-    from train_agent import next_model_tag  # noqa: PLC0415
-
-    # assign a unique tag to each config
+    # assign a unique tag to each config (cfg_id embedded so no collisions at launch time)
     tags = []
-    cfg_id_to_tag = {}
     for cfg in configs:
-        t = next_model_tag('Cstar', machine=MACHINE)
+        t = _next_worker_tag(MACHINE, cfg['id'])
         tags.append(t)
-        cfg_id_to_tag[cfg['id']] = t
 
     # build sweep_configs dict: tag → summary string (for GUI)
     sweep_configs_dict = {t: _cfg_summary_str(cfg) for t, cfg in zip(tags, configs)}
@@ -718,7 +707,8 @@ def _run_sweep():
             try:
                 with open(rfile) as f:
                     r = json.load(f)
-                best = float(r.get('best', float('nan')))
+                _best = r.get('best')
+                best = float(_best) if _best is not None else float('nan')
                 os.remove(rfile)
             except Exception:
                 pass
@@ -752,7 +742,6 @@ def _run_sweep():
         print('\n  no sweep results to summarize.')
         return
 
-    # — ranked summary —
     print('\n' + '='*70)
     print('  sweep summary (ranked by best reward)')
     print('='*70)
@@ -795,7 +784,7 @@ def _run_sweep():
         if base is None:
             print('  no base model found. aborting.')
             return
-        from train_agent import next_model_tag as _next_tag  # noqa: PLC0415
+        from train_agent import next_model_tag as _next_tag
         next_tag = _next_tag('Cstar', machine=MACHINE)
         solo_sentinel = os.path.join(LOGS, '.finetune_mode')
 
@@ -828,7 +817,7 @@ def _run_sweep():
             'gaussian_widths': chosen_cfg['gaussian_widths'],
         }
 
-        from train_agent import finetune_exp_c  # noqa: PLC0415
+        from train_agent import finetune_exp_c
         aborted = False
         try:
             final_path, best = finetune_exp_c(
@@ -1260,7 +1249,7 @@ def _collab_train_loop(sess, sweep_cfg=None):
     def _train(name, path, budget=2_000_000):
         try:
             sys.path.insert(0, SCRIPTS)
-            from train_agent import finetune_exp_c, next_model_tag  # noqa
+            from train_agent import finetune_exp_c, next_model_tag
             tag      = next_model_tag(exp_type, machine=MACHINE)
             sentinel = os.path.join(LOGS, '.finetune_mode')
             with open(sentinel, 'w') as f:
@@ -1459,7 +1448,7 @@ def _worker_fn(base_path, budget, tag, machine, seed, result_path, scripts_path,
         pass
 
     sys.path.insert(0, scripts_path)
-    from train_agent import finetune_exp_c  # noqa: PLC0415
+    from train_agent import finetune_exp_c
 
     log_file = os.path.join(logs_path, f'{tag}_worker.log')
     try:
@@ -1492,11 +1481,7 @@ def _worker_fn(base_path, budget, tag, machine, seed, result_path, scripts_path,
 
 def _sweep_worker_fn(base_path, budget, tag, machine, seed, result_path, scripts_path,
                      logs_path, sac_kwargs, env_kwargs, cfg_id):
-    """worker function for parallel hyperparameter sweep — runs in a separate process.
-
-    Like _worker_fn but also accepts sac_kwargs and env_kwargs which are forwarded
-    to finetune_exp_c so each worker trains with its own config.
-    """
+    import math
     import random
 
     random.seed(seed)
@@ -1508,7 +1493,7 @@ def _sweep_worker_fn(base_path, budget, tag, machine, seed, result_path, scripts
         pass
 
     sys.path.insert(0, scripts_path)
-    from train_agent import finetune_exp_c  # noqa: PLC0415
+    from train_agent import finetune_exp_c
 
     log_file = os.path.join(logs_path, f'{tag}_worker.log')
     try:
@@ -1529,9 +1514,10 @@ def _sweep_worker_fn(base_path, budget, tag, machine, seed, result_path, scripts
             env_kwargs=env_kwargs,
             exp='Cstar',
         )
-        result = {'tag': tag, 'cfg_id': cfg_id, 'path': final_path, 'best': best}
+        result = {'tag': tag, 'cfg_id': cfg_id, 'path': str(final_path),
+                  'best': float(best) if not math.isnan(float(best)) else None}
     except Exception as e:
-        result = {'tag': tag, 'cfg_id': cfg_id, 'error': str(e), 'best': float('nan')}
+        result = {'tag': tag, 'cfg_id': cfg_id, 'error': str(e), 'best': None}
 
     try:
         with open(result_path, 'w') as f:

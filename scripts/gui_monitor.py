@@ -19,6 +19,7 @@ except ImportError as _e:
     print(f'  gui_monitor: matplotlib not available ({_e}). run pip install matplotlib.')
     HAS_MATPLOTLIB = False
 
+import datetime
 import numpy as np
 
 # paths
@@ -38,7 +39,6 @@ _T0 = time.time()
 # data loading
 
 def _find_eval_path():
-    """return (tag, path) for the most recent evaluations.npz to display."""
     # finetune mode: read sentinel for exact tag
     if os.path.exists(SENTINEL):
         try:
@@ -67,7 +67,6 @@ def _find_eval_path():
 
 
 def _load_data():
-    """return (tag, timesteps, mean_rewards, file_mtime) or (None, ...)."""
     tag, path = _find_eval_path()
     if path is None:
         return None, None, None, None
@@ -76,18 +75,18 @@ def _load_data():
         steps  = d['timesteps'].astype(float)
         means  = d['results'].mean(axis=1)
         mtime  = os.path.getmtime(path)
-        return tag, steps, means, mtime
+        wall   = _steps_to_wallclock(steps, mtime)
+        cutoff = datetime.datetime.fromtimestamp(_T0)
+        mask   = np.array([w >= cutoff for w in wall])
+        if not mask.any():
+            return tag, None, None, None
+        return tag, steps[mask], means[mask], mtime
     except Exception:
         return None, None, None, None
 
 
 def _steps_to_wallclock(steps, mtime):
-    """convert a steps array to wall-clock datetime objects.
-
-    Strategy: assume the last eval point happened at file mtime.
-    Project earlier points backward using STEPS_PER_SEC.
-    """
-    import datetime
+    # last eval point = file mtime; project earlier points backward
     t_last = mtime
     wall   = []
     for s in steps:
@@ -100,7 +99,6 @@ def _steps_to_wallclock(steps, mtime):
 # plot setup
 
 def _format_xaxis(ax, wall_times):
-    """choose HH:MM vs date+time based on run duration."""
     if not wall_times:
         return
     span = (wall_times[-1] - wall_times[0]).total_seconds()
@@ -121,11 +119,6 @@ MAX_LABEL_LENGTH = 50  # max chars for config summary in legend labels
 
 
 def _run_parallel_gui(tags, budget, sweep_configs=None):
-    """parallel mode GUI: one colored line per worker + CPU bar chart inset.
-
-    When *sweep_configs* is provided (dict mapping tag → config summary string)
-    the chart shows sweep-specific labels and title instead of plain tags.
-    """
     try:
         import psutil
         HAS_PSUTIL = True
@@ -194,8 +187,15 @@ def _run_parallel_gui(tags, budget, sweep_configs=None):
                     continue
                 _last_mtimes[i] = mtime
                 d = np.load(p)
-                steps = d['timesteps'].astype(float) / 1e6
-                means = d['results'].mean(axis=1)
+                raw_steps = d['timesteps'].astype(float)
+                means     = d['results'].mean(axis=1)
+                wall   = _steps_to_wallclock(raw_steps, mtime)
+                cutoff = datetime.datetime.fromtimestamp(_T0)
+                mask   = np.array([w >= cutoff for w in wall])
+                if not mask.any():
+                    continue
+                steps = raw_steps[mask] / 1e6
+                means = means[mask]
                 best_so_far = np.maximum.accumulate(means)
                 scat.set_offsets(np.column_stack([steps, means]))
                 line.set_xdata(steps)
@@ -248,7 +248,6 @@ def _run_parallel_gui(tags, budget, sweep_configs=None):
 
 
 def _run_single_gui():
-    """single-worker GUI (original behaviour)."""
     fig, ax = plt.subplots(figsize=(10, 5))
     fig.patch.set_facecolor('#1e1e2e')
     ax.set_facecolor('#1e1e2e')
@@ -288,11 +287,9 @@ def _run_single_gui():
 
         wall = _steps_to_wallclock(steps, mtime)
 
-        # scatter: all eval points
         xdata = mdates.date2num(wall)
         scat.set_offsets(np.column_stack([xdata, means]))
 
-        # best-so-far step line
         best_so_far = np.maximum.accumulate(means)
         line_b.set_xdata(xdata)
         line_b.set_ydata(best_so_far)
@@ -316,18 +313,11 @@ def _run_single_gui():
         fig.tight_layout()
         fig.canvas.draw_idle()
 
-    anim = FuncAnimation(fig, _update, interval=10_000, cache_frame_data=False)  # 10 s refresh
-
-    # run an initial update immediately
+    anim = FuncAnimation(fig, _update, interval=10_000, cache_frame_data=False)
     _update(0)
-
     plt.show()
-
-    # keep anim alive (prevents garbage collection closing the window)
     return anim
 
-
-# animation
 
 def main():
     if not HAS_MATPLOTLIB:
