@@ -42,7 +42,7 @@ collab mode lets two machines fine-tune experiment C models back-and-forth overn
 
 for the two machines to reach each other you need:
 
-**Windows (firewall rules — run in an elevated PowerShell):**
+**Windows (firewall rules, run in an elevated PowerShell):**
 ```powershell
 # allow inbound ICMP (ping) so the other machine can test connectivity
 New-NetFirewallRule -DisplayName "Allow ICMPv4 inbound" -Protocol ICMPv4 -IcmpType 8 -Direction Inbound -Action Allow
@@ -71,20 +71,20 @@ if ping fails, fix the firewall first (see above). collab mode will also fail if
 
 collab works on any network where the two machines can reach each other on port 7777:
 
-- **same Wi-Fi / LAN** — just use the local IP addresses (e.g. `192.168.x.x`). find them with `ipconfig` on Windows and `ip addr` or `ifconfig` on Linux.
-- **Tailscale (anywhere)** — install [Tailscale](https://tailscale.com/) on both machines, log in with the same account, and use the `100.x.x.x` Tailscale IP instead of the LAN IP. this works even across different networks (e.g. one machine on Wi-Fi, one on ethernet, or one at a different location entirely).
+- **same Wi-Fi / LAN**: just use the local IP addresses (e.g. `192.168.x.x`). find them with `ipconfig` on Windows and `ip addr` or `ifconfig` on Linux.
+- **Tailscale (anywhere)**: install [Tailscale](https://tailscale.com/) on both machines, log in with the same account, and use the `100.x.x.x` Tailscale IP instead of the LAN IP. this works even across different networks (e.g. one machine on Wi-Fi, one on ethernet, or one at a different location entirely).
 
 ### how collab mode works
 
-1. **connect** — each machine listens on port 7777 and simultaneously tries to connect outward to the peer. whichever direction succeeds first becomes the session. you can type `ip <address>` at the prompt to change the target IP on the fly.
+1. **connect**: each machine listens on port 7777 and simultaneously tries to connect outward to the peer. whichever direction succeeds first becomes the session. you can type `ip <address>` at the prompt to change the target IP on the fly.
 
-2. **model pot** — both machines share a list of available experiment C models ("the pot"). each entry shows the model name, its best evaluation reward, whether it's stored locally or on the peer, and whether it's currently being trained.
+2. **model pot**: both machines share a list of available experiment C models ("the pot"). each entry shows the model name, its best evaluation reward, whether it's stored locally or on the peer, and whether it's currently being trained.
 
-3. **requesting models** — if the best available model isn't local, the machine sends a `model_request` to the peer, which streams the zip back over the socket. once received, the file is saved to `models/` and training starts automatically.
+3. **requesting models**: if the best available model isn't local, the machine sends a `model_request` to the peer, which streams the zip back over the socket. once received, the file is saved to `models/` and training starts automatically.
 
-4. **training loop** — each machine picks the highest-reward untrained model it has locally and launches a fine-tune run in a background thread (2 million steps by default). while training it broadcasts `training_start` so the peer knows what's happening.
+4. **training loop**: each machine picks the highest-reward untrained model it has locally and launches a fine-tune run in a background thread (2 million steps by default). while training it broadcasts `training_start` so the peer knows what's happening.
 
-5. **sharing results** — when training finishes the new model zip is renamed to include the reward (e.g. `exp_C_main_003_r810_success.zip`) and a `training_done` message is broadcast. the peer adds it to the pot and can request it immediately if it's the new best.
+5. **sharing results**: when training finishes the new model zip is renamed to include the reward (e.g. `exp_C_main_003_r810_success.zip`) and a `training_done` message is broadcast. the peer adds it to the pot and can request it immediately if it's the new best.
 
 ### model naming convention
 
@@ -98,7 +98,7 @@ exp_C_main_003_r810_success.zip
       └─ experiment letter
 ```
 
-the `_success` suffix appears when the model's best reward meets the success threshold for that experiment (500 for experiment C). models without the suffix are still useful — they're just not there yet.
+the `_success` suffix appears when the model's best reward meets the success threshold for that experiment (500 for experiment C). models without the suffix are still useful, they're just not there yet.
 
 when checking out models from the pot, the filename tells you at a glance how well it performed.
 
@@ -106,13 +106,15 @@ when checking out models from the pot, the filename tells you at a glance how we
 
 i trained experiments A, B, and C on the Windows machine over about 16 hours, watching the reward curves climb while monitoring in tensorboard. experiment C with the SAC agent and multi-objective reward got to a best reward of ~789, which already clears the 500-point success threshold.
 
-then i got another computer set up — a macbook air someone was throwing out, now running ubuntu — and spent a while getting the two machines talking to each other. once ping worked and the firewall rules were in place, collab mode connected on the first try. both machines started fine-tuning exp C back and forth overnight.
+then i got another computer set up (a macbook air someone was throwing out, now running ubuntu) and spent a while getting the two machines talking to each other. once ping worked and the firewall rules were in place, collab mode connected on the first try. both machines started fine-tuning exp C back and forth overnight.
 
-i checked back the next day after both machines had been running for about 20 hours. the initial improvement i saw early on had stopped. the reward was stuck around 850 and wasn't moving. the problem is all i had was a timestamp in the terminal — i couldn't tell whether the model had waves of near-success and then fell back, or whether it just flatlined there and stayed. 850 is above the success threshold (500) but i want to see if it can do better and actually nail the orbit consistently.
+i checked back the next day after both machines had been running for about 20 hours. the initial improvement i saw early on had stopped. the reward was stuck around 850 and wasn't moving. the problem is all i had was a timestamp in the terminal, so i couldn't tell whether the model had waves of near-success and then fell back, or whether it just flatlined there and stayed. 850 is above the success threshold (500) but i want to see if it can do better and actually nail the orbit consistently.
 
-next step: build a proper live GUI for each machine — a window that stays open while training, shows the current reward curve updating in real time, and plots each eval result with a timestamp on the x-axis so i can actually see the shape of the learning curve over wall-clock time, not just step count. that way if it spikes and falls back i'll know, and i can make better decisions about when to change parameters instead of guessing from a single number in the morning.
+next step: build a proper live GUI for each machine, a window that stays open while training, shows the current reward curve updating in real time, and plots each eval result with a timestamp on the x-axis so i can actually see the shape of the learning curve over wall-clock time, not just step count. that way if it spikes and falls back i'll know, and i can make better decisions about when to change parameters instead of guessing from a single number in the morning.
 
-i then looked into different ways to optimize my current setup on the windows machine and found that since it has 12 physical cores i could theoretically run 10 parallel workers and get roughly 10x the training throughput overnight. then the machine started getting hot, so i did some research on how to control cpu throttling — figuring out which power plan settings and core limits let me maximize training speed without cooking the hardware.
+i also tried running parallel training on the windows machine. since it has 12 physical cores the idea was to spawn 8 or 10 workers simultaneously, each with a different random seed, and let them all race to find the best config. it worked in terms of producing models, but it immediately pegged every core at 100 percent and the machine ran way too hot. had to kill it after a few minutes. not worth the thermal risk, so i went back to the single-worker approach and leaned harder on the two-machine collab pot instead.
+
+i then looked into different ways to optimize my current setup on the windows machine and found that since it has 12 physical cores i could theoretically run 10 parallel workers and get roughly 10x the training throughput overnight. then the machine started getting hot, so i did some research on how to control cpu throttling, figuring out which power plan settings and core limits let me maximize training speed without cooking the hardware.
 
 ## status
 
