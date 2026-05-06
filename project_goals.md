@@ -1,29 +1,74 @@
 # project goals
 
-not for submission. internal tracking only.
+not for submission. internal tracking only.  
+last updated: 2026-05-06
 
-## original starting point
+---
 
-letsgetlunar_rl.py ran train, evaluate, and plot sequentially with no user interaction. models were saved to hardcoded folder names (ppo_sparse_small, ppo_shaped_large, sac_multiobjective_medium). each run would overwrite the previous one.
+## overview
 
-## what we want to achieve
+design an RL agent to control thrust angle β(t) for optimal lunar orbital insertion.  
+target orbit: **400 km circular orbit** (alt ±20 km, Vr < 50 m/s, Vtan within 100 m/s of 1511 m/s).  
+deliverable: 2–4 page writeup summarizing reward functions, architectures, algorithms, and takeaways.
 
-- interactive menu with time budgeted training
-- non-overwriting model saves using tagged names (exp_A_001, exp_C_002, etc.)
-- attempt log that records each run to logs/attempt_log.csv with per-experiment stats
-- auto-launch of the training monitor when training starts
-- early stopping via StopTrainingOnNoModelImprovement to avoid wasted compute
+---
 
-## current status (run 1)
+## ✅ done
 
-run 1 complete. exp A and exp B failed as expected: sparse reward produced no learning, shaped reward showed no meaningful convergence either. exp C (SAC multiobjective) reached best reward 789.4 with 59% success rate over 121 evals. training stopped early when reward declined from 789 to 368 with no recovery. best model saved at models/sac_multiobjective_medium/best_model.zip.
+- [x] project 2 NLP baseline complete — scipy trust-constr solver converges, produces clean β(t) profile and all 4 figures
+- [x] dynamics validated — altitude, Vr, Vtan, and angular position all match expected physics
+- [x] NLP output saved to `output/` (optimal_trajectory.csv, optimal_beta_profile.csv, figures)
+- [x] pipeline runner (`letsgetlunar.py`) works end-to-end
+- [x] RL infrastructure built — interactive menu, time-budgeted training, tagged model saves (exp_A_001, etc.)
+- [x] attempt log wired up — `logs/attempt_log.csv` records per-experiment stats
+- [x] training monitor auto-launches on training start
+- [x] early stopping via `StopTrainingOnNoModelImprovement`
+- [x] run 1 complete
+  - [x] exp A (PPO sparse reward, small net) — confirmed no learning, expected
+  - [x] exp B (PPO shaped reward, large net) — no meaningful convergence, expected
+  - [x] exp C (SAC multiobjective, medium net) — best reward 789.4, partial progress
 
-## next steps
+---
 
-- run exp C again with the full 2M step budget now that infra is stable
-- compare run 1 vs run 2 results using attempt_log.csv
-- run evaluate_agent.py and plot results for write-up
+## 🔄 in progress
+
+- [ ] exp C re-run with full 2M step budget (run 1 was capped short)
+- [ ] finding a model that converges to orbit insertion criteria
+
+---
+
+## ⬜ not started
+
+- [ ] run `evaluate_agent.py` on best saved model
+- [ ] generate plots from RL agent rollout for writeup (alt, Vr, Vtan, β vs time)
+- [ ] compare run 1 vs run 2 via `attempt_log.csv`
+- [ ] try at least one additional RL algorithm (e.g. DDPG or TD3)
+- [ ] try at least one additional network size variation
+- [ ] try at least one additional reward function variant beyond exp A/B/C
+- [ ] write up sections:
+  - [ ] reward function designs and rationale
+  - [ ] network architectures tried
+  - [ ] algorithm comparison (PPO vs SAC vs ?)
+  - [ ] key observations and takeaways
+  - [ ] results / figures (even if no convergence)
+- [ ] final PDF export of writeup
+
+---
 
 ## success criteria
 
-exp C achieves orbit: altitude within 20 km of 400 km, radial velocity Vr under 50 m/s, tangential velocity Vtan within 100 m/s of circular velocity (1511 m/s).
+| metric | target |
+|---|---|
+| altitude at insertion | 400 km ± 20 km |
+| radial velocity Vr | < 50 m/s |
+| tangential velocity Vtan | within 100 m/s of 1511 m/s |
+
+> convergence is not required for full credit — thorough documentation of what was tried and why is the main grading criteria.
+
+---
+
+## notes
+
+- NLP β(t) profile from project 2 is a useful sanity check — RL agent output should roughly match its shape if it's learning correctly
+- exp C is the most promising so far, keep iterating on SAC before switching algorithms
+- when a model works, run evaluate → plot → drop figures straight into writeup
