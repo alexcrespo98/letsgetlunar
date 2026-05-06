@@ -198,8 +198,8 @@ def _run_parallel_gui(tags, budget):
             ax_main.autoscale_view()
 
         if ax_cpu and HAS_PSUTIL:
-            import psutil
             try:
+                import psutil
                 percore = psutil.cpu_percent(percpu=True)
                 ax_cpu.clear()
                 ax_cpu.set_facecolor('#1e1e2e')

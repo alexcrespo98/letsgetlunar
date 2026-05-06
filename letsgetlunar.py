@@ -1406,11 +1406,11 @@ def _collab_mode(config_id=None, exp_type='C', sweep_cfg=None):
 def _worker_fn(base_path, budget, tag, machine, seed, result_path, scripts_path, logs_path):
     """worker function for parallel training — runs in a separate process."""
     import random
-    import torch
 
     random.seed(seed)
     np.random.seed(seed)
     try:
+        import torch
         torch.manual_seed(seed)
     except Exception:
         pass
