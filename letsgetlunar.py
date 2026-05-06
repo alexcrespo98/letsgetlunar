@@ -671,9 +671,11 @@ def _run_sweep():
         p.start()
         processes.append(p)
         print(f'  started {cfg["id"]} → {tag}')
+        time.sleep(0.5)
 
     print()
 
+    time.sleep(5)
     try:
         while any(p.is_alive() for p in processes):
             _print_worker_status(tags, per_cfg_steps)
@@ -1625,9 +1627,11 @@ def _parallel_train():
         p.start()
         processes.append(p)
         print(f'  started worker {i + 1}/{n_workers}: {tag}  (seed={seed})')
+        time.sleep(0.5)
 
     print()
 
+    time.sleep(5)
     try:
         while any(p.is_alive() for p in processes):
             _print_worker_status(tags, budget)
