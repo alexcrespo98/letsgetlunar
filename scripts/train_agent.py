@@ -28,22 +28,15 @@ SUCCESS_THRESH = {'A': -50.0, 'B': -50.0, 'C': 500.0, 'Cstar': 500.0}
 
 
 def next_model_tag(exp, machine=None):
-    """scan models/ for existing exp_X_[machine_]NNN*.zip and return the next tag.
-
-    When *machine* is provided the tag embeds the machine name so two machines
-    running concurrently cannot produce the same filename.
-    Supports multi-word exp names like 'Cstar'.
-    """
+    # scan models/ for existing exp_X_[machine_]NNN*.zip and return the next tag
     if machine:
         pattern    = os.path.join(MODELS, f'exp_{exp}_{machine}_[0-9][0-9][0-9]*.zip')
         tag_prefix = f'exp_{exp}_{machine}'
-        num_idx    = 3  # 'exp_C_main_003[_r810_success]'.split('_')[3] == '003'
-                        # 'exp_Cstar_main_003[...]'.split('_')[3] == '003' (same index)
+        num_idx    = 3
     else:
         pattern    = os.path.join(MODELS, f'exp_{exp}_[0-9][0-9][0-9]*.zip')
         tag_prefix = f'exp_{exp}'
-        num_idx    = 2  # 'exp_C_003[_r810_success]'.split('_')[2] == '003'
-                        # 'exp_Cstar_003[...]'.split('_')[2] == '003' (same index)
+        num_idx    = 2
 
     existing = glob.glob(pattern)
     nums = []
@@ -58,11 +51,6 @@ def next_model_tag(exp, machine=None):
 
 
 def _rename_with_reward(tag, success_thresh):
-    """rename tag_best.zip (or tag.zip) to include reward and _success suffix.
-
-    Prefers the *_best.zip* checkpoint (best during training) over the final
-    weights.  Returns *(final_path, best_reward)*.
-    """
     eval_log = os.path.join(LOGS, tag, 'evaluations.npz')
     best_reward = float('nan')
     if os.path.exists(eval_log):
@@ -92,11 +80,10 @@ def _rename_with_reward(tag, success_thresh):
 
 
 def run_experiments(budgets=None, exploring_starts_C=True, machine=None):
-    """run all three RL experiments. budgets dict maps exp letter to step count."""
     if budgets is None:
         budgets = {'A': 500_000, 'B': 2_000_000, 'C': 2_000_000}
 
-    # exp A: PPO, sparse reward, small net — baseline, not expected to converge
+    # exp A: PPO, sparse, small net
     tag_A = next_model_tag('A', machine=machine)
     print("\n" + "="*60)
     print("EXPERIMENT A: PPO | 64-64 | SPARSE REWARD | FIXED STARTS")
@@ -143,7 +130,7 @@ def run_experiments(budgets=None, exploring_starts_C=True, machine=None):
     final_A, _ = _rename_with_reward(tag_A, SUCCESS_THRESH['A'])
     print(f"EXP A DONE  ->  {os.path.basename(final_A)}")
 
-    # exp B: PPO, shaped reward, larger net — expect partial convergence
+    # exp B: PPO, shaped reward, larger net
     tag_B = next_model_tag('B', machine=machine)
     print("\n" + "="*60)
     print("EXPERIMENT B: PPO | 256-128-64 | SHAPED REWARD | FIXED STARTS")
@@ -190,7 +177,7 @@ def run_experiments(budgets=None, exploring_starts_C=True, machine=None):
     final_B, _ = _rename_with_reward(tag_B, SUCCESS_THRESH['B'])
     print(f"EXP B DONE  ->  {os.path.basename(final_B)}")
 
-    # exp C: SAC, multiobjective reward, exploring starts — should converge best
+    # exp C: SAC, multiobjective, exploring starts
     tag_C = next_model_tag('C', machine=machine)
     print("\n" + "="*60)
     print("EXPERIMENT C: SAC | 128-128 | MULTI-OBJECTIVE | EXPLORING STARTS")
@@ -198,7 +185,7 @@ def run_experiments(budgets=None, exploring_starts_C=True, machine=None):
     print("="*60)
 
     env_C  = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=exploring_starts_C))
-    eval_C = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=False))  # eval always fixed start so scores are comparable across machines
+    eval_C = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=False))
 
     model_C = SAC(
         'MlpPolicy', env_C,
@@ -215,7 +202,7 @@ def run_experiments(budgets=None, exploring_starts_C=True, machine=None):
 
     best_dir_C = os.path.join(MODELS, tag_C + '_best_tmp')
     os.makedirs(best_dir_C, exist_ok=True)
-    stop_C = StopTrainingOnNoModelImprovement(max_no_improvement_evals=50, min_evals=5, verbose=1)  # 50 instead of 20 — exp C reward is flat for a long time before it clicks
+    stop_C = StopTrainingOnNoModelImprovement(max_no_improvement_evals=50, min_evals=5, verbose=1)
     cb_C   = EvalCallback(
         eval_C,
         best_model_save_path=best_dir_C,
@@ -246,22 +233,6 @@ def run_experiments(budgets=None, exploring_starts_C=True, machine=None):
 def finetune_exp_c(model_path, budget=2_000_000, exploring_starts_C=False,
                    machine=None, tag=None, success_thresh=500.0,
                    sac_kwargs=None, env_kwargs=None, exp='C'):
-    """load an existing exp C / C* model and continue training from it.
-
-    Returns *(final_zip_path, best_reward)*.  The saved filename embeds the
-    best evaluation reward and a ``_success`` suffix when the model meets the
-    success criterion, e.g. ``exp_C_main_003_r810_success.zip``.
-
-    *sac_kwargs* — extra keyword args merged into the SAC constructor.
-                   Supports: learning_rate, buffer_size, batch_size, ent_coef,
-                   policy_kwargs (net_arch).  When *policy_kwargs* / net_arch
-                   differs from the saved model the function creates a new model
-                   with those weights randomly initialised (warm-start is skipped
-                   for architectural changes).
-    *env_kwargs* — extra keyword args forwarded to LunarOrbitEnv
-                   (reward_weights, gaussian_widths, …).
-    *exp*        — experiment name prefix ('C' or 'Cstar').
-    """
     sac_kwargs = dict(sac_kwargs) if sac_kwargs else {}
     env_kwargs = env_kwargs or {}
     tag_C = tag if tag is not None else next_model_tag(exp, machine=machine)
@@ -271,15 +242,14 @@ def finetune_exp_c(model_path, budget=2_000_000, exploring_starts_C=False,
     print("="*60)
 
     env_C  = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=exploring_starts_C, **env_kwargs))
-    eval_C = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=False, **env_kwargs))  # eval always fixed start so scores are comparable across machines
+    eval_C = Monitor(LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=False, **env_kwargs))
 
-    # split architectural kwargs (policy_kwargs / net_arch) from training kwargs
+    # split arch kwargs from training kwargs
     policy_kwargs = sac_kwargs.pop('policy_kwargs', None)
     new_arch      = (policy_kwargs or {}).get('net_arch')
-    train_kwargs  = sac_kwargs  # lr, buffer_size, batch_size, ent_coef (policy_kwargs already popped)
+    train_kwargs  = sac_kwargs
 
     if new_arch:
-        # architecture change: create a fresh model with the requested architecture
         print(f"  note: new net_arch={new_arch} — creating fresh model (no warm-start)")
         create_kwargs = dict(train_kwargs)
         model_C = SAC(
@@ -296,7 +266,6 @@ def finetune_exp_c(model_path, budget=2_000_000, exploring_starts_C=False,
             **create_kwargs,
         )
     else:
-        # same architecture: load weights and apply non-architectural overrides
         custom_objects = {}
         if 'learning_rate' in train_kwargs:
             custom_objects['learning_rate'] = train_kwargs.pop('learning_rate')
@@ -311,7 +280,7 @@ def finetune_exp_c(model_path, budget=2_000_000, exploring_starts_C=False,
 
     best_dir_C = os.path.join(MODELS, tag_C + '_best_tmp')
     os.makedirs(best_dir_C, exist_ok=True)
-    stop_C = StopTrainingOnNoModelImprovement(max_no_improvement_evals=50, min_evals=5, verbose=1)  # 50 instead of 20 — exp C reward is flat for a long time before it clicks
+    stop_C = StopTrainingOnNoModelImprovement(max_no_improvement_evals=50, min_evals=5, verbose=1)
     cb_C = EvalCallback(
         eval_C,
         best_model_save_path=best_dir_C,
