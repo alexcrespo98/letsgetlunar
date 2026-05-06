@@ -1494,6 +1494,150 @@ def _collab_mode(config_id=None, exp_type='C', sweep_cfg=None):
     print('  collab mode ended.')
 
 
+def _hail_mary():
+    """use the project 2 beta profile as a warm start for SAC training."""
+    print('\nhail mary — warm start from project 2 beta profile')
+    print()
+
+    # --- step A: load proj2_beta.csv ---
+    beta_csv = os.path.join(ROOT, 'proj2_beta.csv')
+    if not os.path.exists(beta_csv):
+        print('  proj2_beta.csv not found in project root. aborting.')
+        return
+
+    times_s = []
+    betas_deg = []
+    with open(beta_csv, newline='') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            times_s.append(float(row['time_s']))
+            betas_deg.append(float(row['beta_deg']))
+
+    times_s   = np.array(times_s)
+    betas_deg = np.array(betas_deg)
+    print(f'  loaded {len(times_s)} waypoints  '
+          f'(beta range: {betas_deg.min():.1f}° to {betas_deg.max():.1f}°)')
+
+    # --- step B: smooth discontinuities (professor's neighbor-to-neighbor constraint) ---
+    max_jump_deg = 45.0
+    betas_smooth = betas_deg.copy()
+    total_corrected = 0
+    for _pass in range(2):
+        corrected_this_pass = 0
+        for i in range(1, len(betas_smooth) - 1):
+            if abs(betas_smooth[i] - betas_smooth[i - 1]) > max_jump_deg:
+                betas_smooth[i] = (betas_smooth[i - 1] + betas_smooth[i + 1]) / 2.0
+                corrected_this_pass += 1
+        total_corrected += corrected_this_pass
+    print(f'  smoothing: {total_corrected} waypoints corrected over 2 passes  '
+          f'(smoothed range: {betas_smooth.min():.1f}° to {betas_smooth.max():.1f}°)')
+
+    # --- step C: ask for budget ---
+    hrs_str = input('  how many hours to train after warm start? [2M steps]: ').strip()
+    if hrs_str == '':
+        budget = 2_000_000
+    else:
+        try:
+            budget = int(float(hrs_str) * STEPS_PER_HOUR)
+            budget = max(budget, 50_000)
+        except ValueError:
+            print('  invalid input. using default 2M steps.')
+            budget = 2_000_000
+
+    # --- step D: build/load SAC model ---
+    sys.path.insert(0, SCRIPTS)
+    from lunar_env import LunarOrbitEnv, TS
+    from stable_baselines3 import SAC
+
+    env = LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=True)
+
+    base_path = _best_base_model()
+    if base_path is not None:
+        model = SAC.load(base_path.replace('.zip', ''), env=env)
+        print(f'  super warm start: loaded {os.path.basename(base_path)}')
+    else:
+        model = SAC(
+            'MlpPolicy',
+            env,
+            policy_kwargs={'net_arch': [256, 256]},
+            learning_rate=3e-4,
+            buffer_size=500_000,
+            batch_size=256,
+            ent_coef='auto',
+            verbose=0,
+        )
+        print('  no existing model found — built fresh SAC with 256×256 network')
+
+    # --- step E: seed replay buffer with demo rollouts ---
+    n_demo_episodes = 25
+    total_demo_steps = 0
+    print(f'\n  seeding replay buffer with {n_demo_episodes} demo episodes...')
+    for ep in range(n_demo_episodes):
+        obs, _ = env.reset()
+        terminated = False
+        truncated  = False
+        k = 0
+        while not (terminated or truncated):
+            t_current = k * TS
+            beta_rad  = float(np.interp(t_current, times_s, np.deg2rad(betas_smooth)))
+            beta_rad  = float(np.clip(beta_rad, -np.pi / 2, np.pi / 2))
+            action    = np.array([beta_rad], dtype=np.float32)
+            next_obs, reward, terminated, truncated, _ = env.step(action)
+            model.replay_buffer.add(
+                obs.reshape(1, -1),
+                next_obs.reshape(1, -1),
+                action.reshape(1, -1),
+                np.array([reward]),
+                np.array([float(terminated)]),
+                [{}],
+            )
+            obs = next_obs
+            k  += 1
+            total_demo_steps += 1
+    fill = model.replay_buffer.size() if hasattr(model.replay_buffer, 'size') else model.replay_buffer.pos
+    print(f'  seeded {total_demo_steps:,} demo steps  (buffer fill: {fill:,})')
+
+    # --- step F: train ---
+    from train_agent import next_model_tag
+    tag = 'hailmary_' + next_model_tag('C', machine=MACHINE)
+
+    sentinel = os.path.join(LOGS, '.finetune_mode')
+    with open(sentinel, 'w') as f:
+        f.write(f'{budget} {tag}')
+
+    _launch_monitor()
+
+    from stable_baselines3.common.callbacks import EvalCallback
+    eval_freq  = max(10_000, budget // 100)
+    eval_env   = LunarOrbitEnv(reward_fn='multiobjective', exploring_starts=False)
+    eval_cb    = EvalCallback(
+        eval_env,
+        best_model_save_path=os.path.join(MODELS, tag),
+        log_path=os.path.join(LOGS, tag),
+        eval_freq=eval_freq,
+        n_eval_episodes=10,
+        deterministic=True,
+        verbose=0,
+    )
+
+    print(f'\n  training tag: {tag}')
+    print(f'  steps: {budget:,}')
+    aborted = False
+    try:
+        model.learn(total_timesteps=budget, callback=eval_cb, reset_num_timesteps=False)
+    except KeyboardInterrupt:
+        print('\n  training interrupted.')
+        aborted = True
+    finally:
+        if os.path.exists(sentinel):
+            os.remove(sentinel)
+        final_save = os.path.join(MODELS, f'{tag}_final')
+        model.save(final_save)
+        print(f'  saved: {final_save}.zip')
+
+    _log_attempt(aborted, budgets={'A': 0, 'B': 0, 'C': budget})
+
+
 # main
 
 def _sweep_worker_fn(base_path, budget, tag, machine, seed, result_path, scripts_path,
@@ -1615,8 +1759,9 @@ def main():
     print('    2. collab mode (train with another machine)')
     print('    3. run a pre-trained model')
     print('    4. fine-tune experiment C')
-    print('    5. quit')
-    print('    6. hyperparameter sweep (exp C*)')
+    print('    5. hyperparameter sweep (exp C*)')
+    print('    6. hail mary (use old beta profile as warm start)')
+    print('    7. quit')
     print()
 
     while True:
@@ -1637,11 +1782,15 @@ def main():
             _finetune_exp_c()
             break
         elif choice == '5':
-            print('\n  goodbye.')
+            _select_machine()
+            _run_sweep()
             break
         elif choice == '6':
             _select_machine()
-            _run_sweep()
+            _hail_mary()
+            break
+        elif choice == '7':
+            print('\n  goodbye.')
             break
         else:
             print('  invalid choice.\n')

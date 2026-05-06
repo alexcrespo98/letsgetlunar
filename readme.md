@@ -117,3 +117,20 @@ i also tried running parallel training on the windows machine. since it has 12 p
 ## status
 
 plateau reached. best reward so far: ~850. target is consistent orbit at 400 km altitude (success threshold: 500 reward). both machines have been running collab mode; next move is a live GUI dashboard per machine and a hyperparameter sweep to try to push past the plateau.
+
+## changelog
+
+### 2026-05-06 — hail mary warm start (option 6)
+
+**what was added:** a new main-menu function, *hail mary*, that uses the working beta profile from project 2 (`proj2_beta.csv`) as a behavioral cloning seed for the SAC agent.
+
+**why:** the professor's critique of project 2 flagged that the optimal-control thrust-angle solution jumped discontinuously between +90° and −90°, which is a known NLP numerical stability artifact. before using the profile as training data we apply the **neighbor-to-neighbor constraint** the professor recommended: any waypoint whose beta value differs from its predecessor by more than 45° is replaced with the average of its two neighbors (two smoothing passes). this removes the unphysical discontinuities so the demo rollouts actually teach the agent physically meaningful behavior.
+
+**how the warm start works:**
+1. load and smooth `proj2_beta.csv`
+2. roll out 25 episodes in `LunarOrbitEnv` using the smoothed beta profile, collecting `(obs, action, reward, next_obs, done)` tuples
+3. inject all transitions directly into the SAC replay buffer before training begins
+4. if a best existing exp-C model is found (`_best_base_model()`), load its weights too — giving both a pre-trained policy *and* a pre-seeded buffer (double warm start)
+5. train SAC for the requested budget starting from this seeded state
+
+**quit moved to option 7** — previously option 5, now at the bottom of the list where it belongs.
