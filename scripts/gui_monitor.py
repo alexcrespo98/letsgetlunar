@@ -118,8 +118,12 @@ WORKER_COLORS = [
 ]
 
 
-def _run_parallel_gui(tags, budget):
-    """parallel mode GUI: one colored line per worker + CPU bar chart inset."""
+def _run_parallel_gui(tags, budget, sweep_configs=None):
+    """parallel mode GUI: one colored line per worker + CPU bar chart inset.
+
+    When *sweep_configs* is provided (dict mapping tag → config summary string)
+    the chart shows sweep-specific labels and title instead of plain tags.
+    """
     try:
         import psutil
         HAS_PSUTIL = True
@@ -156,9 +160,14 @@ def _run_parallel_gui(tags, budget):
     scats  = []
     lines  = []
     for tag, color in zip(tags, colors):
+        if sweep_configs:
+            summary = sweep_configs.get(tag, '')
+            label = f'{tag}  {summary[:50]}' if summary else tag
+        else:
+            label = tag
         sc = ax_main.scatter([], [], s=14, color=color, zorder=3, alpha=0.7)
         ln, = ax_main.plot([], [], color=color, linewidth=1.5,
-                           drawstyle='steps-post', zorder=2, label=tag)
+                           drawstyle='steps-post', zorder=2, label=label)
         scats.append(sc)
         lines.append(ln)
 
@@ -223,10 +232,11 @@ def _run_parallel_gui(tags, budget):
         elapsed_s = int(time.time() - _T0)
         h, rem = divmod(elapsed_s, 3600)
         m, s   = divmod(rem, 60)
-        ax_main.set_title(
-            f'parallel exp C*   {n} workers   elapsed: {h:02d}:{m:02d}:{s:02d}',
-            color='#ccccdd', pad=8, fontsize=9
-        )
+        if sweep_configs:
+            title = (f'sweep exp C*   {n} configs   elapsed: {h:02d}:{m:02d}:{s:02d}')
+        else:
+            title = (f'parallel exp C*   {n} workers   elapsed: {h:02d}:{m:02d}:{s:02d}')
+        ax_main.set_title(title, color='#ccccdd', pad=8, fontsize=9)
         fig.canvas.draw_idle()
 
     anim = FuncAnimation(fig, _update, interval=15_000, cache_frame_data=False)
@@ -324,6 +334,7 @@ def main():
     # detect parallel mode
     parallel_tags = []
     parallel_budget = 2_000_000
+    sweep_configs_dict = None
     if os.path.exists(PARALLEL_SENTINEL):
         try:
             import json as _json
@@ -331,11 +342,12 @@ def main():
                 _pd = _json.load(_pf)
                 parallel_tags = _pd.get('workers', [])
                 parallel_budget = _pd.get('budget', 2_000_000)
+                sweep_configs_dict = _pd.get('sweep_configs') or None
         except Exception:
             parallel_tags = []
 
     if parallel_tags:
-        _run_parallel_gui(parallel_tags, parallel_budget)
+        _run_parallel_gui(parallel_tags, parallel_budget, sweep_configs=sweep_configs_dict)
     else:
         _run_single_gui()
 
