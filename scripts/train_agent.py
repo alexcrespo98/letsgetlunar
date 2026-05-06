@@ -282,7 +282,6 @@ def finetune_exp_c(model_path, budget=2_000_000, exploring_starts_C=False,
         # architecture change: create a fresh model with the requested architecture
         print(f"  note: new net_arch={new_arch} — creating fresh model (no warm-start)")
         create_kwargs = dict(train_kwargs)
-        create_kwargs['policy_kwargs'] = policy_kwargs
         model_C = SAC(
             'MlpPolicy', env_C,
             policy_kwargs=policy_kwargs,
