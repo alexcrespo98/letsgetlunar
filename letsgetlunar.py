@@ -675,14 +675,7 @@ def _run_sweep():
 
     print()
 
-    deadline = time.time() + 60
-while time.time() < deadline:
-    if any(p.is_alive() for p in processes):
-        break
-    time.sleep(1)
-else:
-    print('  workers failed to start within 60s — check worker logs')
-    return
+    time.sleep(5)
     try:
         while any(p.is_alive() for p in processes):
             _print_worker_status(tags, per_cfg_steps)
@@ -1638,14 +1631,7 @@ def _parallel_train():
 
     print()
 
-    deadline = time.time() + 60
-while time.time() < deadline:
-    if any(p.is_alive() for p in processes):
-        break
-    time.sleep(1)
-else:
-    print('  workers failed to start within 60s — check worker logs')
-    return
+    time.sleep(5)
     try:
         while any(p.is_alive() for p in processes):
             _print_worker_status(tags, budget)
