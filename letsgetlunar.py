@@ -514,18 +514,26 @@ def _finetune_exp_c():
 
 # hyperparameter sweep
 
-# pre-defined sweep configs (Latin hypercube sample of the parameter space)
+# pre-defined sweep configs — 8 configs that bracket the current Exp C base parameters
+# base: lr=3e-4, net=[128,128], buf=500k, bs=256, ent='auto',
+#       reward_weights=(0.4,0.3,0.3), gaussian_widths=(50.0,200.0)
 SWEEP_CONFIGS = [
-    {'id': 'cfg_01', 'lr': 3e-4,  'net_arch': [128, 128],     'buffer_size': 500_000,   'ent_coef': 'auto', 'batch_size': 256, 'reward_weights': (0.4, 0.3, 0.3),    'gaussian_widths': (50.0, 200.0, 200.0)},
-    {'id': 'cfg_02', 'lr': 1e-3,  'net_arch': [256, 256],     'buffer_size': 1_000_000, 'ent_coef': 'auto', 'batch_size': 512, 'reward_weights': (0.4, 0.3, 0.3),    'gaussian_widths': (50.0, 200.0, 200.0)},
-    {'id': 'cfg_03', 'lr': 1e-3,  'net_arch': [256, 256],     'buffer_size': 1_000_000, 'ent_coef': 'auto', 'batch_size': 256, 'reward_weights': (0.5, 0.25, 0.25),  'gaussian_widths': (50.0, 200.0, 200.0)},
-    {'id': 'cfg_04', 'lr': 3e-4,  'net_arch': [256, 128, 64], 'buffer_size': 1_000_000, 'ent_coef': 0.1,   'batch_size': 256, 'reward_weights': (0.4, 0.3, 0.3),    'gaussian_widths': (30.0, 200.0, 200.0)},
-    {'id': 'cfg_05', 'lr': 1e-4,  'net_arch': [256, 256],     'buffer_size': 500_000,   'ent_coef': 0.2,   'batch_size': 256, 'reward_weights': (0.33, 0.33, 0.34), 'gaussian_widths': (50.0, 200.0, 200.0)},
-    {'id': 'cfg_06', 'lr': 1e-3,  'net_arch': [128, 128],     'buffer_size': 1_000_000, 'ent_coef': 0.1,   'batch_size': 512, 'reward_weights': (0.5, 0.25, 0.25),  'gaussian_widths': (30.0, 200.0, 200.0)},
-    {'id': 'cfg_07', 'lr': 3e-4,  'net_arch': [256, 256],     'buffer_size': 500_000,   'ent_coef': 'auto', 'batch_size': 512, 'reward_weights': (0.33, 0.33, 0.34), 'gaussian_widths': (50.0, 200.0, 200.0)},
-    {'id': 'cfg_08', 'lr': 1e-4,  'net_arch': [128, 128],     'buffer_size': 500_000,   'ent_coef': 0.2,   'batch_size': 512, 'reward_weights': (0.4, 0.3, 0.3),    'gaussian_widths': (30.0, 200.0, 200.0)},
-    {'id': 'cfg_09', 'lr': 1e-4,  'net_arch': [256, 128, 64], 'buffer_size': 1_000_000, 'ent_coef': 'auto', 'batch_size': 256, 'reward_weights': (0.5, 0.25, 0.25),  'gaussian_widths': (30.0, 200.0, 200.0)},
-    {'id': 'cfg_10', 'lr': 1e-3,  'net_arch': [256, 128, 64], 'buffer_size': 500_000,   'ent_coef': 0.1,   'batch_size': 512, 'reward_weights': (0.33, 0.33, 0.34), 'gaussian_widths': (50.0, 200.0, 200.0)},
+    # cfg_01: baseline — exact Exp C params
+    {'id': 'cfg_01', 'lr': 3e-4, 'net_arch': [128, 128], 'buffer_size': 500_000,  'ent_coef': 'auto', 'batch_size': 256, 'reward_weights': (0.4, 0.3, 0.3), 'gaussian_widths': (50.0, 200.0)},
+    # cfg_02: lr just below
+    {'id': 'cfg_02', 'lr': 2e-4, 'net_arch': [128, 128], 'buffer_size': 500_000,  'ent_coef': 'auto', 'batch_size': 256, 'reward_weights': (0.4, 0.3, 0.3), 'gaussian_widths': (50.0, 200.0)},
+    # cfg_03: lr just above
+    {'id': 'cfg_03', 'lr': 5e-4, 'net_arch': [128, 128], 'buffer_size': 500_000,  'ent_coef': 'auto', 'batch_size': 256, 'reward_weights': (0.4, 0.3, 0.3), 'gaussian_widths': (50.0, 200.0)},
+    # cfg_04: net wider
+    {'id': 'cfg_04', 'lr': 3e-4, 'net_arch': [256, 128], 'buffer_size': 500_000,  'ent_coef': 'auto', 'batch_size': 256, 'reward_weights': (0.4, 0.3, 0.3), 'gaussian_widths': (50.0, 200.0)},
+    # cfg_05: net narrower
+    {'id': 'cfg_05', 'lr': 3e-4, 'net_arch': [128,  64], 'buffer_size': 500_000,  'ent_coef': 'auto', 'batch_size': 256, 'reward_weights': (0.4, 0.3, 0.3), 'gaussian_widths': (50.0, 200.0)},
+    # cfg_06: buffer bigger
+    {'id': 'cfg_06', 'lr': 3e-4, 'net_arch': [128, 128], 'buffer_size': 750_000,  'ent_coef': 'auto', 'batch_size': 256, 'reward_weights': (0.4, 0.3, 0.3), 'gaussian_widths': (50.0, 200.0)},
+    # cfg_07: buffer smaller + batch smaller
+    {'id': 'cfg_07', 'lr': 3e-4, 'net_arch': [128, 128], 'buffer_size': 250_000,  'ent_coef': 'auto', 'batch_size': 128, 'reward_weights': (0.4, 0.3, 0.3), 'gaussian_widths': (50.0, 200.0)},
+    # cfg_08: fixed ent_coef + tighter gaussian alt
+    {'id': 'cfg_08', 'lr': 3e-4, 'net_arch': [128, 128], 'buffer_size': 500_000,  'ent_coef': 0.05,   'batch_size': 256, 'reward_weights': (0.4, 0.3, 0.3), 'gaussian_widths': (30.0, 200.0)},
 ]
 
 
@@ -581,7 +589,13 @@ def _next_worker_tag(machine, worker_num):
 
 
 def _run_sweep():
-    """run hyperparameter sweep over exp C* configs."""
+    """run parallel hyperparameter sweep over exp C* configs (one process per config)."""
+    try:
+        import psutil
+        phys_cores = psutil.cpu_count(logical=False) or 4
+    except ImportError:
+        phys_cores = 4
+
     print('\nhyperparameter sweep (exp C*)')
     print()
 
@@ -594,21 +608,21 @@ def _run_sweep():
     except ValueError:
         total_hours = 3.0
 
-    # — number of configs —
+    # — number of configs to run simultaneously —
     max_cfgs = len(SWEEP_CONFIGS)
-    n_str = input(f'  how many configs to test? [6, max {max_cfgs}]: ').strip()
+    default_cfgs = min(max_cfgs, phys_cores)
+    n_str = input(f'  how many configs to test? [{default_cfgs}, max {max_cfgs}]: ').strip()
     try:
-        n_cfgs = min(max(1, int(n_str)), max_cfgs) if n_str else 6
+        n_cfgs = min(max(1, int(n_str)), max_cfgs) if n_str else default_cfgs
     except ValueError:
-        n_cfgs = 6
+        n_cfgs = default_cfgs
 
-    configs  = SWEEP_CONFIGS[:n_cfgs]
-    per_cfg_hours = total_hours / n_cfgs
-    per_cfg_steps = _snap(per_cfg_hours * STEPS_PER_HOUR)
+    configs = SWEEP_CONFIGS[:n_cfgs]
+    per_cfg_steps = _snap(total_hours * STEPS_PER_HOUR)
     per_cfg_steps = max(per_cfg_steps, 50_000)
 
-    print(f'\n  {n_cfgs} configs × {per_cfg_steps/1e6:.2f}M steps each '
-          f'({per_cfg_hours*60:.0f} min/config)')
+    print(f'\n  {n_cfgs} configs running simultaneously, {per_cfg_steps/1e6:.2f}M steps each '
+          f'({total_hours*60:.0f} min total)')
     print()
 
     base_model = _best_base_model()
@@ -619,28 +633,33 @@ def _run_sweep():
     print()
 
     sys.path.insert(0, SCRIPTS)
-    from train_agent import finetune_exp_c, next_model_tag  # noqa: PLC0415
+    from train_agent import next_model_tag  # noqa: PLC0415
 
-    # write sweep results CSV header
-    sweep_csv = os.path.join(LOGS, 'sweep_results.csv')
-    csv_fields = [
-        'config_id', 'learning_rate', 'net_arch', 'buffer_size', 'ent_coef',
-        'batch_size', 'reward_weights', 'gaussian_alt_width', 'steps', 'best_reward',
-    ]
-    csv_exists = os.path.exists(sweep_csv)
+    # assign a unique tag to each config
+    tags = []
+    cfg_id_to_tag = {}
+    for cfg in configs:
+        t = next_model_tag('Cstar', machine=MACHINE)
+        tags.append(t)
+        cfg_id_to_tag[cfg['id']] = t
 
-    results = []  # (cfg, best_reward, steps, tag)
+    # build sweep_configs dict: tag → summary string (for GUI)
+    sweep_configs_dict = {t: _cfg_summary_str(cfg) for t, cfg in zip(tags, configs)}
 
-    for i, cfg in enumerate(configs, 1):
-        cid = cfg['id']
-        print(f'  config {i}/{n_cfgs}: {cid}')
-        print(f'     {_cfg_summary_str(cfg)}')
+    # write parallel sentinel so GUI picks it up
+    sentinel = os.path.join(LOGS, '.parallel_mode')
+    with open(sentinel, 'w') as f:
+        json.dump({'workers': tags, 'budget': per_cfg_steps,
+                   'sweep_configs': sweep_configs_dict}, f)
 
-        next_tag = next_model_tag('Cstar', machine=MACHINE)
-        sentinel = os.path.join(LOGS, '.finetune_mode')
-        with open(sentinel, 'w') as f:
-            f.write(f'{per_cfg_steps} {next_tag}')
+    print('  launching training monitors...')
+    _launch_monitor()
 
+    result_files = [os.path.join(LOGS, f'{tag}_result.json') for tag in tags]
+
+    ctx = multiprocessing.get_context('spawn')
+    processes = []
+    for i, (cfg, tag, rfile) in enumerate(zip(configs, tags, result_files)):
         sac_kw = {
             'learning_rate': cfg['lr'],
             'buffer_size':   cfg['buffer_size'],
@@ -652,51 +671,73 @@ def _run_sweep():
             'reward_weights':  cfg['reward_weights'],
             'gaussian_widths': cfg['gaussian_widths'],
         }
+        p = ctx.Process(
+            target=_sweep_worker_fn,
+            args=(base_model.replace('.zip', ''), per_cfg_steps, tag, MACHINE,
+                  i + 42, rfile, SCRIPTS, LOGS, sac_kw, env_kw, cfg['id']),
+            daemon=False,
+        )
+        p.start()
+        processes.append(p)
+        print(f'  started {cfg["id"]} → {tag}')
 
-        try:
-            final_path, best = finetune_exp_c(
-                base_model,
-                budget=per_cfg_steps,
-                exploring_starts_C=(MACHINE != 'backup'),
-                machine=MACHINE,
-                tag=next_tag,
-                success_thresh=SUCCESS_THRESH['Cstar'],
-                sac_kwargs=sac_kw,
-                env_kwargs=env_kw,
-                exp='Cstar',
-            )
-            r_s = f'{best:.1f}' if not np.isnan(best) else '?'
-            print(f'  config {cid} done → {os.path.basename(final_path)}  (best: {r_s})')
-        except KeyboardInterrupt:
-            print(f'\n  sweep interrupted at {cid}.')
-            if os.path.exists(sentinel):
-                os.remove(sentinel)
-            break
-        except Exception as e:
-            print(f'  config {cid} error: {e}')
-            best = float('nan')
-            final_path = ''
-        finally:
-            if os.path.exists(sentinel):
-                os.remove(sentinel)
+    print()
 
-        steps_done = per_cfg_steps
-        results.append((cfg, best, steps_done, next_tag))
+    try:
+        while any(p.is_alive() for p in processes):
+            _print_worker_status(tags, per_cfg_steps)
+            time.sleep(30)
+    except KeyboardInterrupt:
+        print('\n  stopping all sweep workers...')
+        for p in processes:
+            if p.is_alive():
+                p.terminate()
+
+    for p in processes:
+        p.join()
+
+    _print_worker_status(tags, per_cfg_steps)
+
+    if os.path.exists(sentinel):
+        os.remove(sentinel)
+
+    # collect results and map back to configs
+    tag_to_cfg = {t: cfg for t, cfg in zip(tags, configs)}
+    results = []  # (cfg, best_reward, steps, tag)
+    sweep_csv = os.path.join(LOGS, 'sweep_results.csv')
+    csv_fields = [
+        'config_id', 'learning_rate', 'net_arch', 'buffer_size', 'ent_coef',
+        'batch_size', 'reward_weights', 'gaussian_alt_width', 'steps', 'best_reward',
+    ]
+    csv_exists = os.path.exists(sweep_csv)
+
+    for tag, rfile in zip(tags, result_files):
+        cfg = tag_to_cfg[tag]
+        best = float('nan')
+        if os.path.exists(rfile):
+            try:
+                with open(rfile) as f:
+                    r = json.load(f)
+                best = float(r.get('best', float('nan')))
+                os.remove(rfile)
+            except Exception:
+                pass
+        results.append((cfg, best, per_cfg_steps, tag))
 
         # append to CSV
         try:
             rw = cfg['reward_weights']
             row = {
-                'config_id':         cid,
-                'learning_rate':     cfg['lr'],
-                'net_arch':          'x'.join(str(n) for n in cfg['net_arch']),
-                'buffer_size':       cfg['buffer_size'],
-                'ent_coef':          cfg['ent_coef'],
-                'batch_size':        cfg['batch_size'],
-                'reward_weights':    f"{rw[0]:.2f}/{rw[1]:.2f}/{rw[2]:.2f}",
+                'config_id':          cfg['id'],
+                'learning_rate':      cfg['lr'],
+                'net_arch':           'x'.join(str(n) for n in cfg['net_arch']),
+                'buffer_size':        cfg['buffer_size'],
+                'ent_coef':           cfg['ent_coef'],
+                'batch_size':         cfg['batch_size'],
+                'reward_weights':     f"{rw[0]:.2f}/{rw[1]:.2f}/{rw[2]:.2f}",
                 'gaussian_alt_width': cfg['gaussian_widths'][0],
-                'steps':             steps_done,
-                'best_reward':       f'{best:.1f}' if not np.isnan(best) else '?',
+                'steps':              per_cfg_steps,
+                'best_reward':        f'{best:.1f}' if not np.isnan(best) else '?',
             }
             with open(sweep_csv, 'a', newline='') as f:
                 w = csv.DictWriter(f, fieldnames=csv_fields)
@@ -754,8 +795,9 @@ def _run_sweep():
         if base is None:
             print('  no base model found. aborting.')
             return
-        next_tag = next_model_tag('Cstar', machine=MACHINE)
-        sentinel = os.path.join(LOGS, '.finetune_mode')
+        from train_agent import next_model_tag as _next_tag  # noqa: PLC0415
+        next_tag = _next_tag('Cstar', machine=MACHINE)
+        solo_sentinel = os.path.join(LOGS, '.finetune_mode')
 
         # use full budget for the chosen config
         solo_hours_str = input('  how many hours to train? [2M steps]: ').strip()
@@ -768,7 +810,7 @@ def _run_sweep():
         else:
             solo_budget = 2_000_000
 
-        with open(sentinel, 'w') as f:
+        with open(solo_sentinel, 'w') as f:
             f.write(f'{solo_budget} {next_tag}')
 
         print('\n  launching training monitor in background...')
@@ -786,6 +828,7 @@ def _run_sweep():
             'gaussian_widths': chosen_cfg['gaussian_widths'],
         }
 
+        from train_agent import finetune_exp_c  # noqa: PLC0415
         aborted = False
         try:
             final_path, best = finetune_exp_c(
@@ -805,8 +848,8 @@ def _run_sweep():
             print('\n  training interrupted.')
             aborted = True
         finally:
-            if os.path.exists(sentinel):
-                os.remove(sentinel)
+            if os.path.exists(solo_sentinel):
+                os.remove(solo_sentinel)
 
         _log_attempt(aborted, budgets={'A': 0, 'B': 0, 'C': 0, 'Cstar': solo_budget})
 
@@ -1447,6 +1490,57 @@ def _worker_fn(base_path, budget, tag, machine, seed, result_path, scripts_path,
         pass
 
 
+def _sweep_worker_fn(base_path, budget, tag, machine, seed, result_path, scripts_path,
+                     logs_path, sac_kwargs, env_kwargs, cfg_id):
+    """worker function for parallel hyperparameter sweep — runs in a separate process.
+
+    Like _worker_fn but also accepts sac_kwargs and env_kwargs which are forwarded
+    to finetune_exp_c so each worker trains with its own config.
+    """
+    import random
+
+    random.seed(seed)
+    np.random.seed(seed)
+    try:
+        import torch
+        torch.manual_seed(seed)
+    except Exception:
+        pass
+
+    sys.path.insert(0, scripts_path)
+    from train_agent import finetune_exp_c  # noqa: PLC0415
+
+    log_file = os.path.join(logs_path, f'{tag}_worker.log')
+    try:
+        sys.stdout = open(log_file, 'w', buffering=1)
+        sys.stderr = sys.stdout
+    except OSError:
+        pass
+
+    try:
+        final_path, best = finetune_exp_c(
+            base_path,
+            budget=budget,
+            exploring_starts_C=True,
+            machine=machine,
+            tag=tag,
+            success_thresh=SUCCESS_THRESH['Cstar'],
+            sac_kwargs=sac_kwargs,
+            env_kwargs=env_kwargs,
+            exp='Cstar',
+        )
+        result = {'tag': tag, 'cfg_id': cfg_id, 'path': final_path, 'best': best}
+    except Exception as e:
+        result = {'tag': tag, 'cfg_id': cfg_id, 'error': str(e), 'best': float('nan')}
+
+    try:
+        with open(result_path, 'w') as f:
+            import json as _json
+            _json.dump(result, f)
+    except Exception:
+        pass
+
+
 def _print_worker_status(tags, budget):
     """print a live table of all parallel worker statuses."""
     best_reward = float('-inf')
@@ -1494,10 +1588,10 @@ def _parallel_train():
         phys_cores = 4
         print('  note: psutil not installed. pip install psutil for auto core detection.')
 
-    default_workers = max(1, phys_cores - 2)
+    default_workers = phys_cores
 
     print(f'\n  parallel training (exp C*)')
-    print(f'  detected {phys_cores} physical cores — default: {default_workers} workers (leaving 2 free)')
+    print(f'  detected {phys_cores} physical cores — default: {default_workers} workers')
     print()
 
     base = _best_base_model()
