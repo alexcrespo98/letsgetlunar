@@ -393,7 +393,8 @@ def _run_pretrained_model():
     algo_name, reward_fn, exploring_starts = config
 
     sys.path.insert(0, SCRIPTS)
-    from lunar_env import LunarOrbitEnv, VC
+    from lunar_env import LunarOrbitEnv, VC, R_MOON
+    import matplotlib.pyplot as plt
 
     if algo_name == 'PPO':
         from stable_baselines3 import PPO as AlgoClass
@@ -411,11 +412,26 @@ def _run_pretrained_model():
     steps   = 0
     info    = {}
 
+    traj_t       = []
+    traj_alt_km  = []
+    traj_vr      = []
+    traj_vtan    = []
+    traj_beta    = []
+    traj_r       = []
+    traj_theta   = []
+
     while not done:
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, done, _, info = env.step(action)
         total_r += reward
         steps   += 1
+        traj_t.append(info.get('t', steps))
+        traj_alt_km.append(info.get('altitude_km', 0.0))
+        traj_vr.append(info.get('vr', 0.0))
+        traj_vtan.append(info.get('vtan', 0.0))
+        traj_beta.append(info.get('beta_deg', 0.0))
+        traj_r.append(env.state[0])
+        traj_theta.append(env.state[1])
 
     print(f'\n  total reward:  {total_r:.2f}')
     print(f'  final alt:     {info.get("altitude_km", 0.0):.2f} km  (target: 400)')
@@ -423,6 +439,52 @@ def _run_pretrained_model():
     print(f'  final Vtan:    {info.get("vtan", 0.0):.2f} m/s  (target: {VC:.2f})')
     print(f'  success:       {info.get("success", False)}')
     print(f'  steps:         {steps}')
+
+    # --- trajectory plots ---
+    fig = plt.figure(figsize=(12, 8))
+
+    # top-left: beta profile
+    ax1 = fig.add_subplot(2, 2, 1)
+    ax1.plot(traj_t, traj_beta)
+    ax1.set_xlabel('Time (s)')
+    ax1.set_ylabel('β (deg)')
+    ax1.set_title('Thrust Angle Profile')
+
+    # top-right: altitude profile
+    ax2 = fig.add_subplot(2, 2, 2)
+    ax2.plot(traj_t, traj_alt_km)
+    ax2.axhline(400, linestyle='--', color='gray', label='target 400 km')
+    ax2.set_xlabel('Time (s)')
+    ax2.set_ylabel('Altitude (km)')
+    ax2.set_title('Altitude vs Time')
+
+    # bottom-left: velocity components
+    ax3 = fig.add_subplot(2, 2, 3)
+    ax3.plot(traj_t, traj_vr,   label='Vr')
+    ax3.plot(traj_t, traj_vtan, label='Vtan')
+    ax3.axhline(VC, linestyle='--', color='gray', label=f'target Vtan ({VC:.0f} m/s)')
+    ax3.set_xlabel('Time (s)')
+    ax3.set_ylabel('Velocity (m/s)')
+    ax3.set_title('Vr & Vtan vs Time')
+    ax3.legend()
+
+    # bottom-right: polar orbit trajectory
+    ax4 = fig.add_subplot(2, 2, 4, projection='polar')
+    r_km = [r / 1000.0 for r in traj_r]
+    ax4.plot(traj_theta, r_km)
+    target_r_km = (R_MOON + 400e3) / 1000.0
+    theta_circle = np.linspace(0, 2 * np.pi, 360)
+    ax4.plot(theta_circle, [target_r_km] * 360, linestyle='--', color='gray', label='target orbit')
+    ax4.set_title('Orbital Trajectory')
+
+    fig.suptitle(f'{label}  |  reward: {total_r:.1f}')
+    plt.tight_layout()
+
+    OUTPUT = os.path.join(ROOT, 'output')
+    os.makedirs(OUTPUT, exist_ok=True)
+    fig.savefig(os.path.join(OUTPUT, f'run_{exp}_trajectory.png'))
+
+    plt.show()
 
 
 def _finetune_exp_c():
