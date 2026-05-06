@@ -159,13 +159,21 @@ def _all_model_zips():
                   and 'best_model' not in os.path.basename(z))
 
 
-def _launch_monitor():
-    """launch scripts/check_progress.py and scripts/gui_monitor.py in separate processes."""
+def _launch_monitor(gui=True):
+    """launch scripts/check_progress.py and (optionally) scripts/gui_monitor.py in separate processes.
+
+    Pass gui=False to skip launching the GUI popup — used during solo A/B/C training
+    so only the terminal progress bar runs.
+    """
     check_script = os.path.join(SCRIPTS, 'check_progress.py')
     gui_script   = os.path.join(SCRIPTS, 'gui_monitor.py')
 
+    scripts_to_launch = [check_script]
+    if gui:
+        scripts_to_launch.append(gui_script)
+
     if MACHINE == 'backup':
-        for script in (check_script, gui_script):
+        for script in scripts_to_launch:
             try:
                 subprocess.Popen(['bash', '-c', f'python3 {script}'], start_new_session=True)
             except Exception as exc:
@@ -173,7 +181,7 @@ def _launch_monitor():
         return
 
     plat = platform.system()
-    for script in (check_script, gui_script):
+    for script in scripts_to_launch:
         try:
             if plat == 'Windows':
                 subprocess.Popen(
@@ -326,7 +334,7 @@ def _train_new_model():
         print(f'    exp {exp}: {steps:,} steps')
 
     print('\n  launching training monitor in background...')
-    _launch_monitor()
+    _launch_monitor(gui=False)
 
     sys.path.insert(0, SCRIPTS)
     from train_agent import run_experiments
@@ -423,6 +431,12 @@ def _run_pretrained_model():
     print(f'  final Vtan:    {info.get("vtan", 0.0):.2f} m/s  (target: {VC:.2f})')
     print(f'  success:       {info.get("success", False)}')
     print(f'  steps:         {steps}')
+
+    # generate and show plots for this model
+    print('\n  generating plots...')
+    sys.path.insert(0, SCRIPTS)
+    from evaluate_agent import run_and_plot_single
+    run_and_plot_single(z, exp, algo_name, reward_fn)
 
 
 def _finetune_exp_c():
