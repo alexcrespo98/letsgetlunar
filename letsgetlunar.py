@@ -9,6 +9,7 @@ import csv
 import datetime
 import glob
 import json
+import math
 import os
 import platform
 import queue
@@ -569,6 +570,7 @@ def _best_base_model():
 
 
 def _next_worker_tag(machine, cfg_id):
+    # cfg_id embedded in prefix so each config gets a unique namespace at launch time
     prefix = f'exp_Cstar_{machine}_{cfg_id}_'
     pattern = os.path.join(MODELS, f'{prefix}[0-9][0-9][0-9]*.zip')
     existing = glob.glob(pattern)
@@ -1481,7 +1483,6 @@ def _worker_fn(base_path, budget, tag, machine, seed, result_path, scripts_path,
 
 def _sweep_worker_fn(base_path, budget, tag, machine, seed, result_path, scripts_path,
                      logs_path, sac_kwargs, env_kwargs, cfg_id):
-    import math
     import random
 
     random.seed(seed)
