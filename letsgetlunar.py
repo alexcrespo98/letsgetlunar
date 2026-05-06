@@ -634,15 +634,6 @@ def _run_sweep():
         t = _next_worker_tag(MACHINE, cfg['id'])
         tags.append(t)
 
-    # build sweep_configs dict: tag → summary string (for GUI)
-    sweep_configs_dict = {t: _cfg_summary_str(cfg) for t, cfg in zip(tags, configs)}
-
-    # write parallel sentinel so GUI picks it up
-    sentinel = os.path.join(LOGS, '.parallel_mode')
-    with open(sentinel, 'w') as f:
-        json.dump({'workers': tags, 'budget': per_cfg_steps,
-                   'sweep_configs': sweep_configs_dict}, f)
-
     print('  launching training monitors...')
     _launch_monitor()
 
@@ -697,9 +688,6 @@ def _run_sweep():
         p.join()
 
     _print_worker_status(tags, per_cfg_steps)
-
-    if os.path.exists(sentinel):
-        os.remove(sentinel)
 
     # collect results and map back to configs
     tag_to_cfg = {t: cfg for t, cfg in zip(tags, configs)}
@@ -1446,50 +1434,6 @@ def _collab_mode(config_id=None, exp_type='C', sweep_cfg=None):
 
 # main
 
-def _worker_fn(base_path, budget, tag, machine, seed, result_path, scripts_path, logs_path):
-    """worker function for parallel training — runs in a separate process."""
-    import random
-
-    random.seed(seed)
-    np.random.seed(seed)
-    try:
-        import torch
-        torch.manual_seed(seed)
-    except Exception:
-        pass
-
-    sys.path.insert(0, scripts_path)
-    from train_agent import finetune_exp_c
-
-    log_file = os.path.join(logs_path, f'{tag}_worker.log')
-    try:
-        sys.stdout = open(log_file, 'w', buffering=1)
-        sys.stderr = sys.stdout
-    except OSError:
-        pass
-
-    try:
-        final_path, best = finetune_exp_c(
-            base_path,
-            budget=budget,
-            exploring_starts_C=True,
-            machine=machine,
-            tag=tag,
-            success_thresh=500.0,
-            exp='Cstar',
-        )
-        result = {'tag': tag, 'path': final_path, 'best': best}
-    except Exception as e:
-        result = {'tag': tag, 'error': str(e), 'best': float('nan')}
-
-    try:
-        with open(result_path, 'w') as f:
-            import json as _json
-            _json.dump(result, f)
-    except Exception:
-        pass
-
-
 def _sweep_worker_fn(base_path, budget, tag, machine, seed, result_path, scripts_path,
                      logs_path, sac_kwargs, env_kwargs, cfg_id):
     import random
@@ -1575,129 +1519,6 @@ def _print_worker_status(tags, budget):
     print('  refreshing every 30s — ctrl+c to stop all workers')
 
 
-def _parallel_train():
-    """menu option 7: spawn N parallel finetune workers for exp C*."""
-    try:
-        import psutil
-        phys_cores = psutil.cpu_count(logical=False) or 4
-    except ImportError:
-        phys_cores = 4
-        print('  note: psutil not installed. pip install psutil for auto core detection.')
-
-    default_workers = phys_cores
-
-    print(f'\n  parallel training (exp C*)')
-    print(f'  detected {phys_cores} physical cores — default: {default_workers} workers')
-    print()
-
-    base = _best_base_model()
-    if base is None:
-        print('  no exp C or C* models found. train a base model first (option 4).')
-        return
-
-    n_str = input(f'  number of parallel workers [{default_workers}]: ').strip()
-    try:
-        n_workers = max(1, int(n_str)) if n_str else default_workers
-    except ValueError:
-        n_workers = default_workers
-
-    budget_str = input('  steps per worker [2000000]: ').strip()
-    try:
-        budget = max(50_000, int(budget_str)) if budget_str else 2_000_000
-    except ValueError:
-        budget = 2_000_000
-
-    tags = [_next_worker_tag(MACHINE, w) for w in range(1, n_workers + 1)]
-
-    sentinel = os.path.join(LOGS, '.parallel_mode')
-    with open(sentinel, 'w') as f:
-        json.dump({'workers': tags, 'budget': budget}, f)
-
-    print(f'\n  base model: {os.path.basename(base)}')
-    print(f'  workers: {n_workers}   steps each: {budget:,}')
-    print()
-
-    print('  launching training monitors...')
-    _launch_monitor()
-
-    result_files = [os.path.join(LOGS, f'{tag}_result.json') for tag in tags]
-
-    ctx = multiprocessing.get_context('spawn')
-    processes = []
-    for i, (tag, rfile) in enumerate(zip(tags, result_files)):
-        seed = i + 42
-        p = ctx.Process(
-            target=_worker_fn,
-            args=(base.replace('.zip', ''), budget, tag, MACHINE, seed, rfile, SCRIPTS, LOGS),
-            daemon=False,
-        )
-        p.start()
-        processes.append(p)
-        print(f'  started worker {i + 1}/{n_workers}: {tag}  (seed={seed})')
-        time.sleep(0.5)
-
-    print()
-
-    deadline = time.time() + 60
-    while time.time() < deadline:
-        if any(p.is_alive() for p in processes):
-            break
-        time.sleep(1)
-    else:
-        print('  workers failed to start within 60s — check worker logs')
-        return
-    try:
-        while any(p.is_alive() for p in processes):
-            _print_worker_status(tags, budget)
-            time.sleep(30)
-    except KeyboardInterrupt:
-        print('\n  stopping all workers...')
-        for p in processes:
-            if p.is_alive():
-                p.terminate()
-
-    for p in processes:
-        p.join()
-
-    _print_worker_status(tags, budget)
-
-    if os.path.exists(sentinel):
-        os.remove(sentinel)
-
-    results = []
-    for tag, rfile in zip(tags, result_files):
-        if os.path.exists(rfile):
-            try:
-                with open(rfile) as f:
-                    r = json.load(f)
-                results.append(r)
-                os.remove(rfile)
-            except Exception:
-                pass
-
-    if results:
-        results.sort(key=lambda r: r.get('best', float('-inf')), reverse=True)
-        print('\n  parallel training results (ranked):')
-        for rank, r in enumerate(results, 1):
-            marker = '  <- best' if rank == 1 else ''
-            b = r.get('best', float('nan'))
-            b_s = f'{b:.1f}' if not np.isnan(float(b)) else '?'
-            err = f'  error: {r["error"]}' if 'error' in r else ''
-            print(f'  {rank}. {r.get("tag", "?")}  best={b_s}{marker}{err}')
-
-        winner = results[0]
-        w_best = winner.get('best', float('nan'))
-        w_name = winner.get('tag', '?')
-        w_best_s = f'{w_best:.1f}' if not np.isnan(float(w_best)) else '?'
-        print(f'\n  winner: {w_name}  (best reward: {w_best_s})')
-
-        collab_ans = (input('\n  start collab mode with the winner? (y/n) [n]: ').strip().lower() or 'n')
-        if collab_ans == 'y':
-            _collab_mode()
-    else:
-        print('\n  no results collected (workers may have been interrupted before any eval).')
-
-
 def main():
     print()
     print('letsgetlunar')
@@ -1734,7 +1555,6 @@ def main():
     print('    4. fine-tune experiment C')
     print('    5. quit')
     print('    6. hyperparameter sweep (exp C*)')
-    print('    7. parallel training, exp C* (Windows, multi-core)')
     print()
 
     while True:
@@ -1760,10 +1580,6 @@ def main():
         elif choice == '6':
             _select_machine()
             _run_sweep()
-            break
-        elif choice == '7':
-            _select_machine()
-            _parallel_train()
             break
         else:
             print('  invalid choice.\n')
