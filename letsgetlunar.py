@@ -15,6 +15,7 @@ import queue
 import socket
 import subprocess
 import sys
+import multiprocessing
 import threading
 
 import numpy as np
@@ -62,7 +63,7 @@ ABORT_REASONS = [
 ]
 
 
-# ── machine selection ────────────────────────────────────────────────────────
+# machine selection
 
 def _select_machine():
     """ask which machine this is and set the global MACHINE variable."""
@@ -71,7 +72,7 @@ def _select_machine():
     print('  1. main (windows PC)')
     print('  2. backup (macbook air, ubuntu)')
     while True:
-        choice = input('enter 1 or 2: ').strip()
+        choice = input('enter 1 or 2 [1]: ').strip() or '1'
         if choice == '1':
             MACHINE = 'main'
             break
@@ -99,7 +100,7 @@ def _select_machine():
         print()
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# helpers
 
 def _snap(steps):
     return max(SNAP, round(steps / SNAP) * SNAP)
@@ -198,11 +199,11 @@ def _launch_monitor():
             print(f'  note: could not launch {os.path.basename(script)} ({exc}). run it manually.')
 
 
-# ── log attempt ───────────────────────────────────────────────────────────────
+# log attempt
 
 def _log_attempt(aborted, budgets=None):
     """prompt user to save this training run to logs/attempt_log.csv."""
-    ans = input('\nsave this run to logs/attempt_log.csv? (y/n): ').strip().lower()
+    ans = (input('\nsave this run to logs/attempt_log.csv? (y/n) [y]: ').strip().lower() or 'y')
     if ans != 'y':
         return
 
@@ -245,9 +246,9 @@ def _log_attempt(aborted, budgets=None):
         marker = '  <-- default' if r == default_abort else ''
         print(f'    {i}. {r}{marker}')
 
-    hours_str = input('\n  hours trained (enter to skip): ').strip()
+    hours_str = input('\n  hours trained [skip]: ').strip()
 
-    abort_str = input(f'  abort reason 1-{len(ABORT_REASONS)} (enter for default): ').strip()
+    abort_str = input(f'  abort reason 1-{len(ABORT_REASONS)} [{default_abort}]: ').strip()
     if abort_str == '':
         abort_reason = default_abort
     else:
@@ -300,11 +301,11 @@ def _log_attempt(aborted, budgets=None):
     print(f'\n  saved {len(rows)} row(s) to {log_file}')
 
 
-# ── menu actions ──────────────────────────────────────────────────────────────
+# menu actions
 
 def _train_new_model():
     print('\ntrain a new model')
-    hours_str = input('  how much time do you have in hours? (enter for no limit): ').strip()
+    hours_str = input('  how much time do you have in hours? [no limit]: ').strip()
 
     if hours_str == '':
         hours   = None
@@ -457,9 +458,7 @@ def _finetune_exp_c():
         best_str = f'{best:.1f}' if not np.isnan(best) else 'n/a'
         print(f'  {i:>4}  {label:<44}  {best_str:>11}  ({n_evals})')
 
-    choice = input('\n  pick a model by number (or enter to cancel): ').strip()
-    if not choice:
-        return
+    choice = input('\n  pick a model by number [1]: ').strip() or '1'
     try:
         idx = int(choice) - 1
         label, best, n_evals, model_path = rows[idx]
@@ -467,7 +466,7 @@ def _finetune_exp_c():
         print('  invalid choice.')
         return
 
-    hours_str = input('  how many additional hours to train? (enter for default 2M steps): ').strip()
+    hours_str = input('  how many additional hours to train? [2M steps]: ').strip()
     if hours_str == '':
         budget = 2_000_000
     else:
@@ -513,7 +512,7 @@ def _finetune_exp_c():
     _log_attempt(aborted, budgets={'A': 0, 'B': 0, 'C': budget})
 
 
-# ── hyperparameter sweep ──────────────────────────────────────────────────────
+# hyperparameter sweep
 
 # pre-defined sweep configs (Latin hypercube sample of the parameter space)
 SWEEP_CONFIGS = [
@@ -563,33 +562,45 @@ def _best_base_model():
     return best_p
 
 
+def _next_worker_tag(machine, worker_num):
+    """return next available tag for parallel worker N."""
+    prefix = f'exp_Cstar_{machine}_w{worker_num:02d}_'
+    pattern = os.path.join(MODELS, f'{prefix}[0-9][0-9][0-9]*.zip')
+    existing = glob.glob(pattern)
+    nums = []
+    for f in existing:
+        stem = os.path.basename(f).replace('.zip', '')
+        if stem.startswith(prefix):
+            rest = stem[len(prefix):]
+            try:
+                nums.append(int(rest[:3]))
+            except ValueError:
+                pass
+    n = max(nums) + 1 if nums else 1
+    return f'{prefix}{n:03d}'
+
+
 def _run_sweep():
     """run hyperparameter sweep over exp C* configs."""
     print('\nhyperparameter sweep (exp C*)')
     print()
 
     # — time budget —
-    while True:
-        hrs_str = input('  how many hours total for the sweep? (suggested: 2-4 hours): ').strip()
-        try:
-            total_hours = float(hrs_str)
-            if total_hours > 0:
-                break
-        except ValueError:
-            pass
-        print('  enter a positive number.')
+    hrs_str = input('  how many hours total for the sweep? [3]: ').strip()
+    try:
+        total_hours = float(hrs_str) if hrs_str else 3.0
+        if total_hours <= 0:
+            total_hours = 3.0
+    except ValueError:
+        total_hours = 3.0
 
     # — number of configs —
     max_cfgs = len(SWEEP_CONFIGS)
-    while True:
-        n_str = input(f'  how many configs to test? (suggested: 6-10, max {max_cfgs}): ').strip()
-        try:
-            n_cfgs = int(n_str)
-            if 1 <= n_cfgs <= max_cfgs:
-                break
-        except ValueError:
-            pass
-        print(f'  enter a number between 1 and {max_cfgs}.')
+    n_str = input(f'  how many configs to test? [6, max {max_cfgs}]: ').strip()
+    try:
+        n_cfgs = min(max(1, int(n_str)), max_cfgs) if n_str else 6
+    except ValueError:
+        n_cfgs = 6
 
     configs  = SWEEP_CONFIGS[:n_cfgs]
     per_cfg_hours = total_hours / n_cfgs
@@ -622,7 +633,7 @@ def _run_sweep():
 
     for i, cfg in enumerate(configs, 1):
         cid = cfg['id']
-        print(f'  ── config {i}/{n_cfgs}: {cid} ──────────────────────────────')
+        print(f'  config {i}/{n_cfgs}: {cid}')
         print(f'     {_cfg_summary_str(cfg)}')
 
         next_tag = next_model_tag('Cstar', machine=MACHINE)
@@ -716,8 +727,7 @@ def _run_sweep():
     print(f"  i suggest config {best_cfg['id']} (best reward: {best_r:.1f}).")
     print()
     print('  which config do you choose?')
-    print(f'  (enter number 1-{len(sorted_results)}, or press enter for suggestion):')
-    choice_str = input('  > ').strip()
+    choice_str = input(f'  pick config 1-{len(sorted_results)} [{sorted_results[0][0]["id"]}]: ').strip()
 
     chosen_cfg = best_cfg  # default: suggestion
     if choice_str:
@@ -731,7 +741,7 @@ def _run_sweep():
     print(f'  {_cfg_summary_str(chosen_cfg)}')
     print()
 
-    collab_ans = input('  are we collaborating on this one? (y/n): ').strip().lower()
+    collab_ans = (input('  are we collaborating on this one? (y/n) [n]: ').strip().lower() or 'n')
     if collab_ans == 'y':
         print(f"\n  starting collab mode with config {chosen_cfg['id']}.")
         print(f"  make sure the other machine also runs the sweep and selects {chosen_cfg['id']},")
@@ -748,7 +758,7 @@ def _run_sweep():
         sentinel = os.path.join(LOGS, '.finetune_mode')
 
         # use full budget for the chosen config
-        solo_hours_str = input('  how many hours to train? (enter for 2M steps): ').strip()
+        solo_hours_str = input('  how many hours to train? [2M steps]: ').strip()
         if solo_hours_str:
             try:
                 solo_budget = int(float(solo_hours_str) * STEPS_PER_HOUR)
@@ -801,7 +811,7 @@ def _run_sweep():
         _log_attempt(aborted, budgets={'A': 0, 'B': 0, 'C': 0, 'Cstar': solo_budget})
 
 
-# ── collab mode ───────────────────────────────────────────────────────────────
+# collab mode
 
 def _nan2none(x):
     return None if (isinstance(x, float) and np.isnan(x)) else x
@@ -848,7 +858,7 @@ class _CollabSession:
         self._thread = threading.Thread(target=self._connect_loop, daemon=True)
         self._thread.start()
 
-    # ── public api ────────────────────────────────────────────────────────────
+    # public api
 
     def stop(self):
         self.stopped = True
@@ -905,7 +915,7 @@ class _CollabSession:
             return None, None
         return max(cands, key=lambda x: x[1].get('best_reward', float('-inf')))
 
-    # ── internals ─────────────────────────────────────────────────────────────
+    # internals
 
     def _drop(self):
         with self._sock_lock:
@@ -1139,7 +1149,6 @@ def _collab_print_pot(sess):
         return
     names = sorted(pot, key=lambda n: pot[n].get('best_reward', float('-inf')), reverse=True)
     print(f'  {"model":<42}  {"best reward":>11}  {"location":>8}  status')
-    print(f'  {"─"*42}  {"─"*11}  {"─"*8}  ──────')
     for n in names:
         i   = pot[n]
         r   = i.get('best_reward', float('nan'))
@@ -1354,7 +1363,7 @@ def _collab_mode(config_id=None, exp_type='C', sweep_cfg=None):
     print('  1. host mode (windows PC, always listens on port 7777)')
     print('  2. auxiliary mode (macbook/ubuntu, connects to host)')
     while True:
-        ch = input('  pick 1 or 2: ').strip()
+        ch = input('  pick 1 or 2 [1]: ').strip() or '1'
         if ch == '1':
             MACHINE = 'main'
             print(f'\n  host mode: listening on port {COLLAB_PORT}, also trying {MACHINE_IPS["backup"]}')
@@ -1392,7 +1401,203 @@ def _collab_mode(config_id=None, exp_type='C', sweep_cfg=None):
     print('  collab mode ended.')
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
+# main
+
+def _worker_fn(base_path, budget, tag, machine, seed, result_path, scripts_path, logs_path):
+    """worker function for parallel training — runs in a separate process."""
+    import random
+    import torch
+
+    random.seed(seed)
+    np.random.seed(seed)
+    try:
+        torch.manual_seed(seed)
+    except Exception:
+        pass
+
+    sys.path.insert(0, scripts_path)
+    from train_agent import finetune_exp_c  # noqa: PLC0415
+
+    log_file = os.path.join(logs_path, f'{tag}_worker.log')
+    try:
+        sys.stdout = open(log_file, 'w', buffering=1)
+        sys.stderr = sys.stdout
+    except OSError:
+        pass
+
+    try:
+        final_path, best = finetune_exp_c(
+            base_path,
+            budget=budget,
+            exploring_starts_C=True,
+            machine=machine,
+            tag=tag,
+            success_thresh=500.0,
+            exp='Cstar',
+        )
+        result = {'tag': tag, 'path': final_path, 'best': best}
+    except Exception as e:
+        result = {'tag': tag, 'error': str(e), 'best': float('nan')}
+
+    try:
+        with open(result_path, 'w') as f:
+            import json as _json
+            _json.dump(result, f)
+    except Exception:
+        pass
+
+
+def _print_worker_status(tags, budget):
+    """print a live table of all parallel worker statuses."""
+    best_reward = float('-inf')
+    rows = []
+    for tag in tags:
+        log_path = os.path.join(LOGS, tag, 'evaluations.npz')
+        if os.path.exists(log_path):
+            try:
+                d = np.load(log_path)
+                means = d['results'].mean(axis=1)
+                best = float(means.max())
+                recent = float(means[-1])
+                steps = int(d['timesteps'][-1])
+                pct = min(100.0, steps / budget * 100) if budget > 0 else 0.0
+                if best > best_reward:
+                    best_reward = best
+                rows.append((tag, steps, recent, best, pct))
+            except Exception:
+                rows.append((tag, 0, float('nan'), float('nan'), 0.0))
+        else:
+            rows.append((tag, 0, float('nan'), float('nan'), 0.0))
+
+    os.system('cls' if os.name == 'nt' else 'clear')
+    print('  parallel training — exp C*')
+    print()
+    print(f'  {"worker":<32}  {"steps":>8}  {"pct":>5}  {"recent":>8}  {"best":>8}')
+    print(f'  {"":<32}  {"":>8}  {"":>5}  {"":>8}  {"":>8}')
+    for tag, steps, recent, best, pct in rows:
+        marker = '  <- best' if (not np.isnan(best) and abs(best - best_reward) < 0.01) else ''
+        r_s = f'{recent:.1f}' if not np.isnan(recent) else 'starting'
+        b_s = f'{best:.1f}' if not np.isnan(best) else 'starting'
+        s_s = f'{steps:,}' if steps > 0 else 'starting'
+        p_s = f'{pct:.0f}%' if pct > 0 else ''
+        print(f'  {tag:<32}  {s_s:>8}  {p_s:>5}  {r_s:>8}  {b_s:>8}{marker}')
+    print()
+    print('  refreshing every 30s — ctrl+c to stop all workers')
+
+
+def _parallel_train():
+    """menu option 7: spawn N parallel finetune workers for exp C*."""
+    try:
+        import psutil
+        phys_cores = psutil.cpu_count(logical=False) or 4
+    except ImportError:
+        phys_cores = 4
+        print('  note: psutil not installed. pip install psutil for auto core detection.')
+
+    default_workers = max(1, phys_cores - 2)
+
+    print(f'\n  parallel training (exp C*)')
+    print(f'  detected {phys_cores} physical cores — default: {default_workers} workers (leaving 2 free)')
+    print()
+
+    base = _best_base_model()
+    if base is None:
+        print('  no exp C or C* models found. train a base model first (option 4).')
+        return
+
+    n_str = input(f'  number of parallel workers [{default_workers}]: ').strip()
+    try:
+        n_workers = max(1, int(n_str)) if n_str else default_workers
+    except ValueError:
+        n_workers = default_workers
+
+    budget_str = input('  steps per worker [2000000]: ').strip()
+    try:
+        budget = max(50_000, int(budget_str)) if budget_str else 2_000_000
+    except ValueError:
+        budget = 2_000_000
+
+    tags = [_next_worker_tag(MACHINE, w) for w in range(1, n_workers + 1)]
+
+    sentinel = os.path.join(LOGS, '.parallel_mode')
+    with open(sentinel, 'w') as f:
+        json.dump({'workers': tags, 'budget': budget}, f)
+
+    print(f'\n  base model: {os.path.basename(base)}')
+    print(f'  workers: {n_workers}   steps each: {budget:,}')
+    print()
+
+    print('  launching training monitors...')
+    _launch_monitor()
+
+    result_files = [os.path.join(LOGS, f'{tag}_result.json') for tag in tags]
+
+    ctx = multiprocessing.get_context('spawn')
+    processes = []
+    for i, (tag, rfile) in enumerate(zip(tags, result_files)):
+        seed = i + 42
+        p = ctx.Process(
+            target=_worker_fn,
+            args=(base.replace('.zip', ''), budget, tag, MACHINE, seed, rfile, SCRIPTS, LOGS),
+            daemon=False,
+        )
+        p.start()
+        processes.append(p)
+        print(f'  started worker {i + 1}/{n_workers}: {tag}  (seed={seed})')
+
+    print()
+
+    try:
+        while any(p.is_alive() for p in processes):
+            _print_worker_status(tags, budget)
+            time.sleep(30)
+    except KeyboardInterrupt:
+        print('\n  stopping all workers...')
+        for p in processes:
+            if p.is_alive():
+                p.terminate()
+
+    for p in processes:
+        p.join()
+
+    _print_worker_status(tags, budget)
+
+    if os.path.exists(sentinel):
+        os.remove(sentinel)
+
+    results = []
+    for tag, rfile in zip(tags, result_files):
+        if os.path.exists(rfile):
+            try:
+                with open(rfile) as f:
+                    r = json.load(f)
+                results.append(r)
+                os.remove(rfile)
+            except Exception:
+                pass
+
+    if results:
+        results.sort(key=lambda r: r.get('best', float('-inf')), reverse=True)
+        print('\n  parallel training results (ranked):')
+        for rank, r in enumerate(results, 1):
+            marker = '  <- best' if rank == 1 else ''
+            b = r.get('best', float('nan'))
+            b_s = f'{b:.1f}' if not np.isnan(float(b)) else '?'
+            err = f'  error: {r["error"]}' if 'error' in r else ''
+            print(f'  {rank}. {r.get("tag", "?")}  best={b_s}{marker}{err}')
+
+        winner = results[0]
+        w_best = winner.get('best', float('nan'))
+        w_name = winner.get('tag', '?')
+        w_best_s = f'{w_best:.1f}' if not np.isnan(float(w_best)) else '?'
+        print(f'\n  winner: {w_name}  (best reward: {w_best_s})')
+
+        collab_ans = (input('\n  start collab mode with the winner? (y/n) [n]: ').strip().lower() or 'n')
+        if collab_ans == 'y':
+            _collab_mode()
+    else:
+        print('\n  no results collected (workers may have been interrupted before any eval).')
+
 
 def main():
     print()
@@ -1401,7 +1606,7 @@ def main():
     print('alex crespo | 2026')
     print()
 
-    grader = input('  are you a grader? (y/n): ').strip().lower()
+    grader = input('  are you a grader? (y/n) [n]: ').strip().lower() or 'n'
     if grader == 'y':
         print()
         print('  hello! glad you\'re here.')
@@ -1411,7 +1616,7 @@ def main():
         print('    2. run one of my pre-trained models  (higher reward = better performance)')
         print('    3. exit')
         print()
-        grader_choice = input('  pick an option: ').strip()
+        grader_choice = input('  pick an option [2]: ').strip() or '2'
         if grader_choice == '1':
             global MACHINE
             MACHINE = 'main'
@@ -1430,10 +1635,11 @@ def main():
     print('    4. fine-tune experiment C')
     print('    5. quit')
     print('    6. hyperparameter sweep (exp C*)')
+    print('    7. parallel training, exp C* (Windows, multi-core)')
     print()
 
     while True:
-        choice = input('  pick an option: ').strip()
+        choice = input('  pick an option [1]: ').strip() or '1'
         if choice == '1':
             _select_machine()
             _train_new_model()
@@ -1455,6 +1661,10 @@ def main():
         elif choice == '6':
             _select_machine()
             _run_sweep()
+            break
+        elif choice == '7':
+            _select_machine()
+            _parallel_train()
             break
         else:
             print('  invalid choice.\n')

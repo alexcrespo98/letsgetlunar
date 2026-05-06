@@ -7,7 +7,7 @@ import time
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 os.chdir(ROOT)
 
-# ── detect fine-tune mode ────────────────────────────────────────────────────
+# detect fine-tune mode
 SENTINEL = os.path.join('logs', '.finetune_mode')
 FINETUNE_MODE = os.path.exists(SENTINEL)
 FINETUNE_BUDGET = None
@@ -20,6 +20,20 @@ if FINETUNE_MODE:
             FINETUNE_TAG = _parts[1] if len(_parts) > 1 else None
     except (ValueError, OSError, IndexError):
         FINETUNE_BUDGET = 2_000_000
+
+PARALLEL_SENTINEL = os.path.join('logs', '.parallel_mode')
+PARALLEL_MODE = os.path.exists(PARALLEL_SENTINEL)
+PARALLEL_TAGS = []
+PARALLEL_BUDGET = 2_000_000
+if PARALLEL_MODE:
+    try:
+        import json as _json
+        with open(PARALLEL_SENTINEL) as _pf:
+            _pd = _json.load(_pf)
+            PARALLEL_TAGS = _pd.get('workers', [])
+            PARALLEL_BUDGET = _pd.get('budget', 2_000_000)
+    except Exception:
+        PARALLEL_MODE = False
 
 TRAIN_START = time.time()
 
@@ -96,6 +110,50 @@ def _active_exps_list():
 
 while True:
     os.system('cls' if os.name == 'nt' else 'clear')
+
+    if PARALLEL_MODE:
+        if not os.path.exists(PARALLEL_SENTINEL):
+            print('  parallel mode ended. exiting monitor.')
+            break
+        print('=' * 60)
+        print(f'  parallel training monitor   time: {elapsed(TRAIN_START)}')
+        print('=' * 60)
+        best_so_far = float('-inf')
+        rows = []
+        for tag in PARALLEL_TAGS:
+            p = os.path.join('logs', tag, 'evaluations.npz')
+            if os.path.exists(p):
+                try:
+                    d = np.load(p)
+                    means = d['results'].mean(axis=1)
+                    steps = int(d['timesteps'][-1])
+                    best = float(means.max())
+                    recent = float(means[-1])
+                    pct = min(100.0, steps / PARALLEL_BUDGET * 100)
+                    n_success = int((means >= SUCCESS_THRESH['Cstar']).sum())
+                    if best > best_so_far:
+                        best_so_far = best
+                    rows.append((tag, steps, recent, best, pct, n_success, len(means)))
+                except Exception:
+                    rows.append((tag, 0, float('nan'), float('nan'), 0.0, 0, 0))
+            else:
+                rows.append((tag, 0, float('nan'), float('nan'), 0.0, 0, 0))
+
+        print()
+        print(f'  {"worker":<32}  {"steps":>8}  {"pct":>5}  {"recent":>8}  {"best":>8}  succ')
+        for tag, steps, recent, best, pct, n_success, n_evals in rows:
+            marker = '  <- best' if (not np.isnan(best) and abs(best - best_so_far) < 0.01) else ''
+            r_s = f'{recent:.1f}' if not np.isnan(recent) else 'starting'
+            b_s = f'{best:.1f}' if not np.isnan(best) else 'starting'
+            s_s = f'{steps:,}' if steps > 0 else 'starting'
+            p_s = f'{pct:.0f}%' if pct > 0 else ''
+            su_s = f'{n_success}/{n_evals}' if n_evals > 0 else ''
+            print(f'  {tag:<32}  {s_s:>8}  {p_s:>5}  {r_s:>8}  {b_s:>8}  {su_s}{marker}')
+        print()
+        print(f'\n  refreshing in 30s...  ctrl+c to quit')
+        time.sleep(30)
+        continue
+
     print('=' * 60)
     if FINETUNE_MODE:
         print(f'  fine-tune monitor (exp C)   additional time: {elapsed(TRAIN_START)}')
