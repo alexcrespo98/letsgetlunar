@@ -30,22 +30,31 @@ SUCCESS_THRESH = {'A': -50.0, 'B': -50.0, 'C': 500.0, 'Cstar': 500.0}
 def next_model_tag(exp, machine=None):
     # scan models/ for existing exp_X_[machine_]NNN*.zip and return the next tag
     if machine:
-        pattern    = os.path.join(MODELS, f'exp_{exp}_{machine}_[0-9][0-9][0-9]*.zip')
-        tag_prefix = f'exp_{exp}_{machine}'
-        num_idx    = 3
+        zip_pattern = os.path.join(MODELS, f'exp_{exp}_{machine}_[0-9][0-9][0-9]*.zip')
+        log_pattern = os.path.join(LOGS,   f'exp_{exp}_{machine}_[0-9][0-9][0-9]')
+        tag_prefix  = f'exp_{exp}_{machine}'
+        num_idx     = 3
     else:
-        pattern    = os.path.join(MODELS, f'exp_{exp}_[0-9][0-9][0-9]*.zip')
-        tag_prefix = f'exp_{exp}'
-        num_idx    = 2
+        zip_pattern = os.path.join(MODELS, f'exp_{exp}_[0-9][0-9][0-9]*.zip')
+        log_pattern = os.path.join(LOGS,   f'exp_{exp}_[0-9][0-9][0-9]')
+        tag_prefix  = f'exp_{exp}'
+        num_idx     = 2
 
-    existing = glob.glob(pattern)
-    nums = []
-    for f in existing:
-        parts = os.path.basename(f).replace('.zip', '').split('_')
-        try:
-            nums.append(int(parts[num_idx]))
-        except (ValueError, IndexError):
-            pass
+    def _extract_nums(paths, strip_ext=False):
+        result = []
+        for p in paths:
+            name = os.path.basename(p)
+            if strip_ext:
+                name = name.replace('.zip', '')
+            parts = name.split('_')
+            try:
+                result.append(int(parts[num_idx]))
+            except (ValueError, IndexError):
+                pass
+        return result
+
+    nums = _extract_nums(glob.glob(zip_pattern), strip_ext=True)
+    nums += _extract_nums(glob.glob(log_pattern))
     n = max(nums) + 1 if nums else 1
     return f'{tag_prefix}_{n:03d}'
 

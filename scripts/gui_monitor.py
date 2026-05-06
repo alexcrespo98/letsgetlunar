@@ -51,9 +51,9 @@ def _find_eval_path():
             if os.path.exists(p):
                 return tag, p
 
-    # fall back: most recent tagged log dir (any exp)
+    # fall back: most recent tagged log dir (A/B/C only — Cstar is finetune/sweep mode only)
     candidates = []
-    for pattern in ('exp_C_[0-9][0-9][0-9]', 'exp_Cstar_*', 'exp_B_[0-9][0-9][0-9]', 'exp_A_[0-9][0-9][0-9]'):
+    for pattern in ('exp_C_[0-9][0-9][0-9]', 'exp_B_[0-9][0-9][0-9]', 'exp_A_[0-9][0-9][0-9]'):
         for d in sorted(glob.glob(os.path.join(LOGS, pattern))):
             p = os.path.join(d, 'evaluations.npz')
             if os.path.exists(p):

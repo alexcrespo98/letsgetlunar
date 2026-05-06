@@ -39,9 +39,10 @@ def _find_eval_path(exp):
     tagged += sorted(glob.glob(os.path.join('logs', f'exp_{exp}_*_[0-9][0-9][0-9]', 'evaluations.npz')))
     tagged = sorted(set(tagged))
     plain  = os.path.join('logs', f'exp_{exp}', 'evaluations.npz')
-    if tagged:
-        return tagged[-1]
-    return plain if os.path.exists(plain) else None
+    candidates = tagged + ([plain] if os.path.exists(plain) else [])
+    # skip files that predate this session (stale from a previous run)
+    fresh = [p for p in candidates if os.path.getmtime(p) >= TRAIN_START]
+    return fresh[-1] if fresh else None
 
 
 def _next_started(exp):
@@ -89,7 +90,11 @@ def _active_exps_list():
     """return ordered list of active experiment names for full-run mode."""
     exps = ['A', 'B', 'C']
     cstar_dirs = glob.glob(os.path.join('logs', 'exp_Cstar_*'))
-    if cstar_dirs:
+    if any(
+        os.path.exists(os.path.join(d, 'evaluations.npz')) and
+        os.path.getmtime(os.path.join(d, 'evaluations.npz')) >= TRAIN_START
+        for d in cstar_dirs
+    ):
         exps.append('Cstar')
     return exps
 
