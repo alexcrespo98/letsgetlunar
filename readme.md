@@ -112,6 +112,8 @@ i checked back the next day after both machines had been running for about 20 ho
 
 next step: build a proper live GUI for each machine — a window that stays open while training, shows the current reward curve updating in real time, and plots each eval result with a timestamp on the x-axis so i can actually see the shape of the learning curve over wall-clock time, not just step count. that way if it spikes and falls back i'll know, and i can make better decisions about when to change parameters instead of guessing from a single number in the morning.
 
+i then looked into different ways to optimize my current setup on the windows machine and found that since it has 12 physical cores i could theoretically run 10 parallel workers and get roughly 10x the training throughput overnight. then the machine started getting hot, so i did some research on how to control cpu throttling — figuring out which power plan settings and core limits let me maximize training speed without cooking the hardware.
+
 ## status
 
 plateau reached. best reward so far: ~850. target is consistent orbit at 400 km altitude (success threshold: 500 reward). both machines have been running collab mode; next move is a live GUI dashboard per machine and a hyperparameter sweep to try to push past the plateau.
