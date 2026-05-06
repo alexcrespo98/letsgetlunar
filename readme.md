@@ -1,6 +1,6 @@
 # letsgetlunar
 
-hi there — if you're a grader, the full write-up is in **project3.pdf**.
+howdy, if you're a grader, the full write-up is in **project3.pdf**.
 
 if you want to run the code yourself:
 
