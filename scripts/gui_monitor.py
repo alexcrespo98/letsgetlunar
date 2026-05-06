@@ -117,6 +117,8 @@ WORKER_COLORS = [
     '#a8c8f4', '#f4a8a8', '#a8f4d4', '#d4f4a8', '#f4f4a8',
 ]
 
+MAX_LABEL_LENGTH = 50  # max chars for config summary in legend labels
+
 
 def _run_parallel_gui(tags, budget, sweep_configs=None):
     """parallel mode GUI: one colored line per worker + CPU bar chart inset.
@@ -162,7 +164,7 @@ def _run_parallel_gui(tags, budget, sweep_configs=None):
     for tag, color in zip(tags, colors):
         if sweep_configs:
             summary = sweep_configs.get(tag, '')
-            label = f'{tag}  {summary[:50]}' if summary else tag
+            label = f'{tag}  {summary[:MAX_LABEL_LENGTH]}' if summary else tag
         else:
             label = tag
         sc = ax_main.scatter([], [], s=14, color=color, zorder=3, alpha=0.7)

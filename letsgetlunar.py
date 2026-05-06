@@ -1524,7 +1524,7 @@ def _sweep_worker_fn(base_path, budget, tag, machine, seed, result_path, scripts
             exploring_starts_C=True,
             machine=machine,
             tag=tag,
-            success_thresh=500.0,
+            success_thresh=SUCCESS_THRESH['Cstar'],
             sac_kwargs=sac_kwargs,
             env_kwargs=env_kwargs,
             exp='Cstar',
