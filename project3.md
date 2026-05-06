@@ -1,66 +1,142 @@
-# Project 3 — Reinforcement Learning for Lunar Orbital Insertion
+# Project 3: Reinforcement Learning for Lunar Orbital Insertion
 **Alex Crespo | 2026**
+
+---
 
 ## Assignment Overview
 
-The objective of this project was to design an intelligent agent capable of controlling spacecraft attitude for orbital insertion around the moon. The target orbit was a circular orbit at 400 km altitude with near-zero radial velocity and a tangential velocity matching the circular orbit speed (~1,633 m/s). The agent was trained using reinforcement learning, replacing the fixed optimal control approach used in project 2.
+The goal of this project was to train an agent to control a spacecraft's thrust angle and achieve
+orbital insertion around the moon. The target was a circular orbit at 400 km altitude with near-zero
+radial velocity and a tangential velocity of approximately 1,512 m/s (computed from lunar surface
+gravity of 1.62 m/s^2 and a lunar radius of 1,734.7 km). This replaced the fixed optimal control
+approach from Project 2 with a reinforcement learning agent that figures out the control profile on
+its own through trial and error.
+
+---
 
 ## Carryover from Project 2
 
-Project 2 produced a working beta (thrust angle) profile using direct transcription and nonlinear programming. That profile was not a clean smooth signal. It contained discontinuous jumps between +90° and −90°, which the professor identified as an NLP numerical stability artifact rather than physically meaningful behavior. That result became relevant again in project 3 and is discussed in the hail mary section below.
+Project 2 solved for the optimal thrust angle profile using direct transcription with 60 nodes and
+scipy's trust-constr optimizer. The resulting profile had discontinuous jumps between +90 and -90
+degrees, which the professor identified as a numerical artifact rather than physically meaningful
+behavior. That profile became useful again in Project 3 as a warm-start seed, described below.
+
+---
 
 ## Environment
 
-The physics environment was implemented from scratch in Python using the Gymnasium interface. The spacecraft dynamics follow a polar coordinate equations of motion model with RK4 integration at 0.05 second timesteps. Each episode runs up to 160 seconds. State observations fed to the agent are altitude error, radial velocity, and tangential velocity, each normalized. The action is the thrust angle beta, rate-limited to prevent discontinuous jumps, which directly addresses the professor's feedback from project 2. An episode terminates on success (within tolerance of target altitude and velocities), surface impact, escape above 600 km, or timeout.
+The simulation was written from scratch using the Gymnasium interface. The spacecraft dynamics use a
+polar coordinate equations-of-motion model integrated with RK4 at 0.05 second timesteps. Each
+episode runs up to 160 seconds (3,200 steps). The agent observes normalized altitude error, radial
+velocity, and tangential velocity. It outputs a thrust angle (beta), which is rate-limited so it
+cannot jump discontinuously between steps. An episode ends when the spacecraft hits the success
+tolerances (altitude within 20 km of 400 km, radial velocity under 50 m/s, tangential velocity
+within 100 m/s of 1,512 m/s), crashes, escapes above 600 km, or runs out of time.
+
+---
 
 ## Reward Functions Tried
 
-Three reward functions were implemented and tested as separate experiments.
+Three reward functions were tested as separate experiments.
 
-**Experiment A — Sparse reward (PPO):** The agent only received a signal at episode termination: +1000 for success, −500 for crash, −100 for timeout. This gave the agent almost no gradient signal to learn from. It never meaningfully improved.
+**Experiment A: Sparse reward (PPO).** The agent only got feedback at the very end of an episode:
++1000 for success, -500 for crashing, -100 for timeout. With 3,200 steps and no signal in between,
+the agent had almost nothing to learn from. It never improved. (Figure 1)
 
-**Experiment B — Shaped reward (PPO):** A continuous signal was given at every step based on quadratic penalties on altitude error, radial velocity error, and tangential velocity error, plus a small penalty on control rate of change. Bonus and penalty terms were applied at termination. This performed better than sparse but plateaued early.
+**Experiment B: Shaped reward (PPO).** A signal was given at every step based on how far the
+spacecraft was from the target altitude and velocities, plus a small penalty for changing the thrust
+angle quickly. This worked better than sparse but plateaued early. (Figure 2)
 
-**Experiment C — Multi-objective Gaussian reward (SAC):** Each error term was transformed through a Gaussian kernel so that reward scaled smoothly from 0 to 1 as the spacecraft approached the target. Weights of 0.4 for altitude, 0.3 for radial velocity, and 0.3 for tangential velocity were applied. A small time penalty of 0.001 per step encouraged efficiency. Terminal bonuses and penalties were preserved. This formulation gave the agent a much richer gradient signal across the full state space. The best results came from experiment C and all further development focused there.
+**Experiment C: Gaussian reward (SAC).** Each error term was passed through a Gaussian function so
+the per-step reward scaled smoothly from 0 to 1 as the spacecraft approached the target. Weights
+were 0.4 for altitude, 0.3 for radial velocity, and 0.3 for tangential velocity. A small time
+penalty encouraged the agent to finish faster. A +1000 bonus was added on success and penalties
+applied for crash or escape. This gave the agent a much richer learning signal and produced the best
+results. All further training focused on Experiment C. (Figure 3)
 
-[Insert Experiment A, B, and C reward curves here]
-
-The graphs above show the mean evaluation reward over training timesteps for all three experiments. Experiment A remains flat near zero throughout training, reflecting the inability of the sparse signal to guide learning. Experiment B climbs initially but stalls well below the success threshold. Experiment C shows consistent improvement over time and reaches the highest reward of the three, which is why all subsequent fine-tuning and optimization work was focused on this configuration.
+---
 
 ## Agent Architectures
 
-For experiments A and B, PPO was used with default network sizes. PPO is an on-policy algorithm and requires collecting fresh experience at every update, which is compute-inefficient for a problem this slow to simulate.
+For Experiments A and B, PPO was used. PPO requires generating fresh experience before every
+update, which is slow for a problem where each simulation step is expensive.
 
-For experiment C, SAC (Soft Actor-Critic) was used. SAC is off-policy and samples from a replay buffer, making far better use of every simulated transition. It also includes automatic entropy tuning, which balances exploration and exploitation without manual tuning. The base architecture used two hidden layers of 128 neurons each. A wider 256x256 architecture was tested in the hail mary run described below.
+For Experiment C, SAC (Soft Actor-Critic) was used instead. SAC stores past experience in a replay
+buffer and learns from it repeatedly, which makes much better use of every simulated step. It also
+automatically balances exploration and exploitation. The network used two hidden layers of 128
+neurons each.
+
+---
 
 ## Training and Optimization Attempts
 
-**Solo training** ran experiments A, B, and C sequentially on the main Windows machine. After about 16 hours, experiment C reached a reward of approximately 810.
+**Solo training** ran all three experiments sequentially on the main Windows machine. After about
+16 hours, Experiment C reached a cumulative reward of approximately 810.
 
-**Collab mode** was built to run two machines simultaneously. The main Windows PC and a salvaged MacBook Air running Ubuntu were networked together over a TCP socket on port 7777. Both machines maintained a shared pool of the best experiment C models, automatically transferring weights between machines and fine-tuning whichever model had the highest reward. This ran unattended overnight for about 20 hours and pushed the best reward to approximately 912. The reward then plateaued and stopped improving.
+**Collab mode** networked the main Windows PC and a salvaged MacBook Air running Ubuntu over a TCP
+socket on port 7777. Both machines shared a pool of the best models and each kept fine-tuning
+whichever model had the highest reward, transferring weights back and forth automatically. This ran
+overnight for about 20 hours and pushed the best reward to approximately 912, then it plateaued.
 
-**Parallel multicore sweep** was attempted on the Windows machine, which has 12 physical cores. The idea was to spawn 8 workers simultaneously with different random seeds and hyperparameter configurations, letting each train independently and comparing results. In practice, spawning that many SAC instances simultaneously caused memory exhaustion and repeated crashes. Each SAC instance uses several gigabytes of RAM for the replay buffer, and 8 simultaneous instances exceeded available memory. Runtime was more than twice as slow as serial training, not faster. The sweep was scaled back to 2 to 3 configs at a time.
+**Parallel multicore sweep** tried to run 8 training workers simultaneously on the 12-core Windows
+machine. In practice each SAC instance uses several gigabytes of RAM for its replay buffer, so 8 at
+once exceeded available memory and caused repeated crashes. The sweep was scaled back to 2 to 3
+configs at a time.
 
-**Hyperparameter sweep** tested 8 configurations bracketing the experiment C baseline, varying learning rate, network width, replay buffer size, batch size, and entropy coefficient. The best-performing configuration used a slightly elevated learning rate of 5e-4 with the same 128x128 architecture.
+**Hyperparameter sweep** tested 8 configurations varying learning rate, network size, replay buffer
+size, batch size, and entropy coefficient. No configuration beat the baseline by a meaningful margin.
+The main takeaway was that the original setup was fine and more training time was the bottleneck,
+not the hyperparameters.
 
-[Insert hyperparameter sweep results table or bar chart here]
+**Hail mary warm start** was the final attempt. After more than 100 hours of cumulative training
+with the best reward stuck at 912, the Project 2 beta profile was used to seed the agent. The
+profile was first smoothed to remove the discontinuous jumps: any waypoint differing from its
+neighbor by more than 45 degrees was replaced with the average of its two neighbors, applied in two
+passes. Twenty-five episodes were simulated using this smoothed profile and all the resulting
+transitions were loaded directly into the SAC replay buffer before training began. The best existing
+model (reward 912) was also used to initialize the network weights. At the halfway point of this
+run the reward was 732, which is expected when a model starts integrating new experience from a
+different source. This run is continuing through the submission deadline.
 
-The graph above summarizes the best reward achieved by each sweep configuration. The baseline config and the slightly elevated learning rate config performed best, which informed the decision to keep the learning rate at or near 3e-4 to 5e-4 for subsequent runs.
-
-**Hail mary warm start** was the final approach. After a week of training with the reward stuck near 850 to 912 despite many fine-tune runs, the project 2 beta profile was used as a behavioral cloning seed. The profile was first smoothed to remove the discontinuous jumps the professor identified, using a neighbor-to-neighbor constraint that replaces any waypoint differing from its predecessor by more than 45 degrees with the average of its neighbors, applied in two passes. Twenty-five demo episodes were simulated using this smoothed profile as the action source, and all resulting transitions were injected directly into the SAC replay buffer before training began. The best existing trained model at a reward of approximately 912 was also loaded to initialize the network weights. This gave the agent both a pre-trained policy and a replay buffer seeded with physically informed trajectory examples. The hail mary run reached a reward of 732 at the halfway point of its training budget, consistent with exceeding the previous plateau if training runs to completion.
-
-[Insert hail mary training curve here]
-
-The graph above shows the hail mary reward curve. The agent begins at a much higher reward than any cold-start run, which reflects both the pre-loaded network weights and the beta profile demo data in the replay buffer. The steep early climb confirms the warm start was effective at skipping the slow initial learning phase that consumed most of the compute in earlier experiments.
+---
 
 ## Supporting Infrastructure
 
-Several supporting tools were built to manage the long training runs. A live terminal monitor auto-launched during training and printed reward curves, step counts, and buffer fill level every 30 seconds. A GUI monitor plotted the evaluation reward curve in a persistent window. An attempt log saved metadata about every run including hours trained, best reward, abort reason, and notes. Model filenames encoded the best reward directly so performance was visible without opening logs. These tools were necessary because most runs lasted 8 to 24 hours unattended.
+A live terminal monitor printed reward curves and step counts every 30 seconds. A GUI monitor kept
+a persistent reward curve plot open. An attempt log tracked every run's hours, best reward, and
+abort reason. Model filenames included the best reward number directly so there was no need to open
+logs to compare models. These tools were necessary because most runs lasted 8 to 24 hours unattended.
 
-## What Could Be Tried with More Time
+---
 
-The agent never fully converged to consistent success. With more compute, the most promising next steps would be curriculum learning (starting with an easier version of the problem and gradually tightening tolerances), a prioritized replay buffer that oversamples the rare near-success transitions, and adding the current beta angle as an observation so the agent is aware of its own control history. Including a smoothness penalty on beta rate of change in the reward function more aggressively would also help, consistent with the professor's recommendation to constrain nearest-neighbor control point deviation.
+## Results and What I Would Do Differently
 
-## Summary of Key Observations
+After more than 100 hours of training, the agent never triggered the success condition. The success
+criteria require altitude within 20 km of 400 km, radial velocity under 50 m/s, and tangential
+velocity within 100 m/s of 1,512 m/s -- all three at the same time, within 160 seconds. The best
+reward of 912 reflects accumulated per-step progress across a full 3,200-step episode, not a score
+out of some maximum. The agent learned to steer toward the target and avoid crashing, but could not
+close all three error terms simultaneously before time ran out.
 
-Reward shaping had the single biggest impact on learning speed. Moving from sparse to shaped to Gaussian multi-objective reward dramatically improved gradient signal quality. SAC outperformed PPO significantly for this problem due to replay buffer efficiency. The agent learned faster when given more informative observations and smoother reward surfaces. Collab mode was the most effective compute multiplier that actually worked reliably. Parallel multicore training crashed repeatedly due to memory pressure. The project 2 beta profile, once smoothed, provided genuinely useful warm start data that helped the agent skip the earliest and slowest phase of learning.
+This is a real limitation but not a fundamental one. The reward shaping approach worked -- each
+experiment was a clear improvement over the last. The sweep confirmed the setup was not the problem.
+The bottleneck was compute time and the difficulty of the final convergence step where all three
+tolerances have to be met at once.
+
+Given more time, the three changes most likely to help would be starting the agent on an easier
+version of the problem and gradually tightening the tolerances, sampling near-success episodes more
+often during training since they are rare and informative, and adding the current thrust angle as an
+input so the agent can see its own control state directly.
+
+---
+
+## Summary
+
+Reward shaping made the biggest difference. Going from sparse to shaped to Gaussian reward at each
+step gave the agent progressively better feedback to learn from. SAC was a better fit than PPO for
+this problem because it reuses past experience instead of discarding it. Collab mode across two
+machines was the most effective way to get more training done. The parallel sweep crashed due to
+memory limits and was not useful. The hyperparameter sweep confirmed the baseline design was sound.
+The Project 2 beta profile, once smoothed, provided a useful starting point for the final training
+run. After 100+ hours, the agent made clear progress but did not achieve consistent orbital
+insertion. The hail mary run is still going.
